@@ -70,7 +70,7 @@ func printUsage() {
 	fmt.Println("    port-test -mode tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
 	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443     传统写法")
 	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024     端口范围")
-	fmt.Println("    多主机分隔符: ! # = + \\ / ? (均无需引号)")
+	fmt.Println("    多主机分隔符: ! # = + \\ / ? 、(均无需引号)")
 	fmt.Println()
 	fmt.Println("  全局选项:")
 	fmt.Println("    -mode <mode>     运行模式: port (默认) / tcping")
@@ -444,10 +444,10 @@ func getResponseType() string {
 }
 
 // splitMultiHost 按多主机分隔符切分
-// 支持: ! # = + \ / ? (均为非 shell 保留字符, 不需要引号)
+// 支持: ! # = + \ / ? 、 (均为非 shell 保留字符, 不需要引号)
 func splitMultiHost(s string) []string {
 	var best []string
-	for _, sep := range []string{"!", "#", "=", "+", "\\", "/", "?"} {
+	for _, sep := range []string{"!", "#", "=", "+", "\\", "/", "?", "、"} {
 		if strings.Contains(s, sep) {
 			parts := strings.Split(s, sep)
 			if len(parts) > len(best) {
