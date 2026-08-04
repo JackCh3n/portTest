@@ -66,10 +66,11 @@ func printUsage() {
 	fmt.Println("    port-test -mode tcping 10.0.0.1:8080               单主机单端口")
 	fmt.Println("    port-test -mode tcping 10.0.0.1:8080,443           单主机多端口(逗号)")
 	fmt.Println("    port-test -mode tcping 10.0.0.1:8080 443 8088      单主机多端口(空格)")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080|10.0.0.2:443  多主机用|分隔")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080,443|10.0.0.2:9999  多主机多端口")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080#10.0.0.2:443  多主机用#分隔")
+	fmt.Println("    port-test -mode tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
 	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443     传统写法")
 	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024     端口范围")
+	fmt.Println("    多主机分隔符: # (推荐) ~ | (| 需引号)")
 	fmt.Println()
 	fmt.Println("  全局选项:")
 	fmt.Println("    -mode <mode>     运行模式: port (默认) / tcping")
@@ -130,13 +131,14 @@ func main() {
 }
 
 // runTcpingMode 解析位置参数并启动 tcping
+// 支持的多主机分隔符: | # ~
 // 支持的写法:
 //   port-test -mode tcping 10.0.0.1:8080                    单主机单端口
 //   port-test -mode tcping 10.0.0.1:8080,443               单主机多端口(逗号)
 //   port-test -mode tcping 10.0.0.1:8080 443 8088          单主机多端口(空格)
 //   port-test -mode tcping 10.0.0.1 8080 443               host和端口分开
-//   port-test -mode tcping 10.0.0.1:8080|10.0.0.2:443      多主机用|分隔
-//   port-test -mode tcping 10.0.0.1:8080,443|10.0.0.2:9999 多主机多端口
+//   port-test -mode tcping 10.0.0.1:8080#10.0.0.2:443      多主机用#分隔
+//   port-test -mode tcping 10.0.0.1:8080,443#10.0.0.2:9999 多主机多端口
 //   port-test -mode tcping -ip 10.0.0.1 -p 80,443           传统写法
 func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int) {
 	var targets []HostTarget
@@ -145,18 +147,14 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 		// 合并所有位置参数为一个字符串
 		joined := strings.Join(posArgs, " ")
 
-		// 按 | 分割多主机
-		hostSegs := strings.Split(joined, "|")
-		for i, seg := range hostSegs {
+		// 按 | # ~ 分割多主机（三种分隔符都支持）
+		hostSegs := splitMultiHost(joined)
+		for _, seg := range hostSegs {
 			seg = strings.TrimSpace(seg)
 			if seg == "" {
 				continue
 			}
 			ht := parseHostSegment(seg)
-			if i == len(hostSegs)-1 && len(hostSegs) > 1 {
-				// 最后一段，如果有裸端口，附加到最后一个主机
-				// parseHostSegment 已经处理了
-			}
 			if ht.Host != "" {
 				targets = append(targets, ht)
 			}
@@ -411,4 +409,23 @@ func getResponseType() string {
 		return "Custom JSON"
 	}
 	return "Default JSON"
+}
+
+// splitMultiHost 按多主机分隔符切分
+// 支持: | # ~  (| 在 shell 中是管道符需要引号, # 和 ~ 不需要)
+func splitMultiHost(s string) []string {
+	// 依次尝试分隔符，取分隔后段数最多的
+	var best []string
+	for _, sep := range []string{"|", "#", "~"} {
+		if strings.Contains(s, sep) {
+			parts := strings.Split(s, sep)
+			if len(parts) > len(best) {
+				best = parts
+			}
+		}
+	}
+	if best != nil {
+		return best
+	}
+	return []string{s}
 }
