@@ -105,7 +105,8 @@ func scanTarget(target string, ports []int, timeout time.Duration) ScanResult {
 
 // pingPort 测试单个端口
 func pingPort(target string, port int, timeout time.Duration) PortResult {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	// IPv6 地址需要用 [] 包裹
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	result := PortResult{
 		Port: port,
 	}

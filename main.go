@@ -70,7 +70,7 @@ func printUsage() {
 	fmt.Println("    port-test -mode tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
 	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443     传统写法")
 	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024     端口范围")
-	fmt.Println("    多主机分隔符: ! # = + (均无需引号)")
+	fmt.Println("    多主机分隔符: ! # = + \\ / ? (均无需引号)")
 	fmt.Println()
 	fmt.Println("  全局选项:")
 	fmt.Println("    -mode <mode>     运行模式: port (默认) / tcping")
@@ -131,7 +131,7 @@ func main() {
 }
 
 // runTcpingMode 解析位置参数并启动 tcping
-// 支持的多主机分隔符: ! # = +
+// 支持的多主机分隔符: ! # = + \ / ?
 // 支持的写法:
 //   port-test -mode tcping 10.0.0.1:8080                    单主机单端口
 //   port-test -mode tcping 10.0.0.1:8080,443               单主机多端口(逗号)
@@ -147,7 +147,7 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 		// 合并所有位置参数为一个字符串
 		joined := strings.Join(posArgs, " ")
 
-		// 按 ! # = + 分割多主机
+		// 按 ! # = + \ / ? 分割多主机
 		hostSegs := splitMultiHost(joined)
 		for _, seg := range hostSegs {
 			seg = strings.TrimSpace(seg)
@@ -173,7 +173,7 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 	// 校验
 	if len(targets) == 0 {
 		fmt.Println("  错误: 请指定目标地址")
-		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 ...] [| host2:port ...]")
+		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 ...] [# host2:port ...]")
 		fmt.Println("  或:   port-test -mode tcping -ip <host> -p <ports>")
 		os.Exit(1)
 	}
@@ -182,13 +182,28 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 			fmt.Printf("  错误: 主机 %s 未指定端口\n", targets[i].Host)
 			os.Exit(1)
 		}
+		// 去除重复端口
+		targets[i].Ports = dedupePorts(targets[i].Ports)
 	}
 
 	MultiTcpingMode(targets, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second)
 }
 
+// dedupePorts 去除重复端口
+func dedupePorts(ports []int) []int {
+	seen := make(map[int]bool)
+	result := make([]int, 0, len(ports))
+	for _, p := range ports {
+		if !seen[p] {
+			seen[p] = true
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 // parseHostSegment 解析单个主机段
-// 支持: "10.0.0.1:8080,443", "10.0.0.1:8080 443", "10.0.0.1 8080 443"
+// 支持: "10.0.0.1:8080,443", "[::1]:8080", "::1 8080", "10.0.0.1:8080 443", "10.0.0.1 8080 443"
 func parseHostSegment(seg string) HostTarget {
 	ht := HostTarget{}
 	parts := strings.Fields(seg)
@@ -197,15 +212,32 @@ func parseHostSegment(seg string) HostTarget {
 	}
 
 	first := parts[0]
-	if strings.Contains(first, ":") {
-		// host:port 格式
-		colonParts := strings.SplitN(first, ":", 2)
-		ht.Host = strings.TrimSpace(colonParts[0])
-		portStr := strings.TrimSpace(colonParts[1])
-		// 逗号分隔的端口
+
+	// IPv6 带括号: [::1]:8080
+	if strings.HasPrefix(first, "[") {
+		end := strings.Index(first, "]")
+		if end > 0 {
+			ht.Host = first[1:end]
+			rest := first[end+1:]
+			if strings.HasPrefix(rest, ":") {
+				// [::1]:8080,443
+				portStr := strings.TrimPrefix(rest, ":")
+				ht.Ports = append(ht.Ports, parsePortRange(portStr)...)
+			}
+		} else {
+			ht.Host = first
+		}
+	} else if strings.Count(first, ":") >= 2 {
+		// 纯 IPv6 地址（至少 2 个冒号），如 ::1 或 2001:db8::1
+		ht.Host = first
+	} else if strings.Contains(first, ":") {
+		// IPv4:host:port 格式
+		idx := strings.LastIndex(first, ":")
+		ht.Host = strings.TrimSpace(first[:idx])
+		portStr := strings.TrimSpace(first[idx+1:])
 		ht.Ports = append(ht.Ports, parsePortRange(portStr)...)
 	} else {
-		// 纯 host
+		// 纯 IPv4 或 hostname
 		ht.Host = first
 	}
 
@@ -412,10 +444,10 @@ func getResponseType() string {
 }
 
 // splitMultiHost 按多主机分隔符切分
-// 支持: ! # = + (均为非 shell 保留字符, 不需要引号)
+// 支持: ! # = + \ / ? (均为非 shell 保留字符, 不需要引号)
 func splitMultiHost(s string) []string {
 	var best []string
-	for _, sep := range []string{"!", "#", "=", "+"} {
+	for _, sep := range []string{"!", "#", "=", "+", "\\", "/", "?"} {
 		if strings.Contains(s, sep) {
 			parts := strings.Split(s, sep)
 			if len(parts) > len(best) {
