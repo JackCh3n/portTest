@@ -40,3 +40,7 @@ build-all:
 # 默认本地构建（Windows x86）
 local:
 	GOOS=windows GOARCH=386 go build -o port-test-win-x86.exe main.go
+
+# 矛模式测试
+spear-test:
+	go run main.go -mode spear -ip 127.0.0.1 -p 80,443,3306

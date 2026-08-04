@@ -1,14 +1,14 @@
 # Port Test Tool
 
-一个轻量级端口测试工具，可以占用指定端口并启动测试 Web 页面。
+一个轻量级端口测试工具，支持"盾模式"和"矛模式"。
 
-## 功能特性
+## 两种模式
 
-- 🚀 一键启动，支持同时占用多个端口
-- 📝 支持自定义返回内容（JSON / HTML / 自定义状态码）
-- 🌐 提供简单的 Web 管理界面（健康检查、服务信息）
-- 🔧 支持命令行参数配置
-- 💻 跨平台支持：Windows / Linux / macOS / FreeBSD / ARM / MIPS / LoongArch
+### 🛡️ 盾模式（默认）
+启动 HTTP 服务器占用指定端口，返回自定义内容（JSON/HTML）或状态码。用于本地端口测试、Mock 服务。
+
+### 🗡️ 矛模式
+主动 TCPing 目标 IP 的多个端口，验证网络是否畅通。用于网络连通性检测、端口扫描。
 
 ## 快速开始
 
@@ -18,7 +18,7 @@
 go install github.com/yourname/port-test@latest
 ```
 
-### 使用
+### 盾模式使用
 
 ```bash
 # 启动默认端口 8080，返回 JSON
@@ -40,7 +40,25 @@ port-test -p 8080 -json '{"code":200,"msg":"hello"}'
 port-test -p 8080,9090 -code 200 -html ./index.html
 ```
 
+### 矛模式使用
+
+```bash
+# 基本用法：测试目标IP的指定端口
+port-test -mode spear -ip 192.168.1.1 -p 80,443,3306
+
+# 使用端口范围
+port-test -mode spear -ip 192.168.1.1 -p 1-1024
+
+# 指定超时时间和次数
+port-test -mode spear -ip 10.0.0.1 -p 22,80,443 -timeout 5 -count 3 -interval 2
+
+# 测试公网服务
+port-test -mode spear -ip 114.114.114.114 -p 53,80,443
+```
+
 ## 命令行参数
+
+### 盾模式参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -50,7 +68,18 @@ port-test -p 8080,9090 -code 200 -html ./index.html
 | `-html` | - | 返回指定 HTML 文件 |
 | `-dir` | - | 静态文件目录 |
 
-## API 接口
+### 矛模式参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-mode` | `shield` | 运行模式: `shield` (盾模式) / `spear` (矛模式) |
+| `-ip` | - | 目标IP地址/域名 |
+| `-p` | - | 端口号（支持 `80,443` 和 `1-1024` 范围格式） |
+| `-timeout` | `3` | 连接超时时间（秒） |
+| `-count` | `1` | 测试次数 |
+| `-interval` | `1` | 重试间隔（秒） |
+
+## API 接口（盾模式）
 
 ### GET `/`
 
@@ -75,10 +104,10 @@ go build -o port-test main.go
 ### 交叉编译
 
 ```bash
-# Windows (x86)
+# Windows (x86 32位)
 GOOS=windows GOARCH=386 go build -o port-test-win-x86.exe main.go
 
-# Windows (x64)
+# Windows (x64 64位)
 GOOS=windows GOARCH=amd64 go build -o port-test-win-amd64.exe main.go
 
 # Windows (ARM64)
@@ -96,10 +125,10 @@ GOOS=linux GOARCH=mips64 go build -o port-test-linux-mips64 main.go
 # Linux (LoongArch64 - 龙芯)
 GOOS=linux GOARCH=loong64 go build -o port-test-linux-loong64 main.go
 
-# macOS (x64)
+# macOS (x64 Intel)
 GOOS=darwin GOARCH=amd64 go build -o port-test-mac main.go
 
-# macOS (ARM64/M1/M2)
+# macOS (ARM64 M1/M2/M3)
 GOOS=darwin GOARCH=arm64 go build -o port-test-mac-arm64 main.go
 ```
 
