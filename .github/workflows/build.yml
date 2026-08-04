@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# 显式授予写权限，否则默认 GITHUB_TOKEN 无法创建 Release（403）
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.notes }}
@@ -132,7 +136,7 @@ jobs:
 
     - name: Create Release
       id: create_release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ steps.date.outputs.date }}
         name: v${{ steps.date.outputs.date }}
