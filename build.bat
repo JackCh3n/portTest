@@ -222,7 +222,9 @@ if "%LABEL%"=="openbsd-x64" (
 )
 
 echo Building %LABEL% (%GOOS%/%GOARCH%) -^> %OUT%
-set GOOS=%GOOS% GOARCH=%GOARCH% go build -ldflags="-s -w" -o "%OUT%" .
+set "GOOS=%GOOS%"
+set "GOARCH=%GOARCH%"
+go build -ldflags="-s -w" -o "%OUT%" .
 if errorlevel 1 (
     echo   Warning: build failed ^(Go may not support this target^)
     del "%OUT%" 2>nul
