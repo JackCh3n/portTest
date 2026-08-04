@@ -183,7 +183,16 @@ go test -v ./...
 
 ## GitHub Actions
 
-提交代码自动触发构建，标题格式：`v年_月日_时分`
+提交代码自动触发构建，Release 标题/标签格式：`v年_月日_时分`
+
+二进制产物命名（不带时间戳）：`port-test-<系统>-<架构>[.exe]`
+
+| 系统 | 架构 | 示例 |
+| --- | --- | --- |
+| Windows | x86 / x64 / ARM64 | `port-test-windows-386.exe` |
+| Linux | x86 / x64 / ARM / ARM64 / MIPS / LoongArch | `port-test-linux-amd64` |
+| macOS | x64 / ARM64 | `port-test-darwin-arm64` |
+| FreeBSD / OpenBSD | x64 / ARM64 | `port-test-freebsd-amd64` |
 
 ## License
 
