@@ -32,20 +32,18 @@ type ScanResult struct {
 // SpearMode 矛模式 - TCPing 端口测试
 func SpearMode(target string, ports []int, timeout time.Duration, count int, interval time.Duration) {
 	if target == "" {
-		fmt.Println("错误: 请使用 -ip 指定目标IP地址")
-		fmt.Println("示例: port-test -mode spear -ip 192.168.1.1 -p 80,443,8080")
+		fmt.Println("  错误: 请使用 -ip 指定目标IP地址")
+		fmt.Println("  提示: port-test -mode tcping -ip <host> -p <ports>")
 		return
 	}
 
-	fmt.Println("🗡️  矛模式 - TCP 端口连通性测试")
-	fmt.Println("====================================")
-	fmt.Printf("目标: %s\n", target)
-	fmt.Printf("端口: %v\n", ports)
-	fmt.Printf("超时: %v\n", timeout)
+	fmt.Printf("  目标: %s\n", target)
+	fmt.Printf("  端口: %v\n", ports)
+	fmt.Printf("  超时: %v\n", timeout)
 	if count > 1 {
-		fmt.Printf("次数: %d (间隔 %v)\n", count, interval)
+		fmt.Printf("  次数: %d (间隔 %v)\n", count, interval)
 	}
-	fmt.Println("====================================")
+	fmt.Println("  ------------------------------------")
 
 	if count <= 1 {
 		// 单次扫描
@@ -167,7 +165,7 @@ func getServiceName(port int) string {
 // continuousScan 持续扫描
 func continuousScan(target string, ports []int, timeout time.Duration, count int, interval time.Duration) {
 	for i := 1; i <= count; i++ {
-		fmt.Printf("\n--- 第 %d/%d 次扫描 ---\n", i, count)
+		fmt.Printf("\n  --- 第 %d/%d 次扫描 ---\n", i, count)
 		result := scanTarget(target, ports, timeout)
 		printResult(result)
 
@@ -182,13 +180,13 @@ func printResult(result ScanResult) {
 	for _, r := range result.Results {
 		service := getServiceName(r.Port)
 		if r.Status == "open" {
-			fmt.Printf("  ✅ 端口 %-6d  [开放]  服务: %-8s  延迟: %v\n", r.Port, service, r.Latency)
+			fmt.Printf("    ✅ 端口 %-6d  [开放]  服务: %-8s  延迟: %v\n", r.Port, service, r.Latency)
 		} else {
-			fmt.Printf("  ❌ 端口 %-6d  [关闭]  %s\n", r.Port, r.Error)
+			fmt.Printf("    ❌ 端口 %-6d  [关闭]  %s\n", r.Port, r.Error)
 		}
 	}
-	fmt.Println("------------------------------------")
-	fmt.Printf("总计: %d | 开放: %d | 关闭: %d | 耗时: %v\n",
+	fmt.Println("  ------------------------------------")
+	fmt.Printf("  总计: %d | 开放: %d | 关闭: %d | 耗时: %v\n",
 		result.Total, result.Success, result.Failed, result.TotalTime)
 }
 
