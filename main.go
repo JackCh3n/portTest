@@ -14,10 +14,10 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Ports    []int
-	Code     int
-	JSON     string
-	HTML     string
+	Ports     []int
+	Code      int
+	JSON      string
+	HTML      string
 	StaticDir string
 }
 
@@ -42,81 +42,50 @@ func printHeader() {
 	fmt.Println("====================================")
 }
 
-// 打印 Port 模式帮助
-func printPortHelp() {
-	fmt.Println()
-	fmt.Println("  🛡️  PORT 模式 - 启动 HTTP 测试服务")
-	fmt.Println("  ----------------------------------------")
-	fmt.Println("  启动 HTTP 服务器占用指定端口，返回自定义内容")
-	fmt.Println()
-	fmt.Println("  参数说明:")
-	fmt.Println("    -p <ports>      端口号，多个端口用逗号分隔 (默认: 8080)")
-	fmt.Println("    -code <code>    HTTP 状态码 (默认: 200)")
-	fmt.Println("    -json <json>    自定义 JSON 响应内容")
-	fmt.Println("    -html <path>    返回指定的 HTML 文件")
-	fmt.Println("    -dir <path>     静态文件目录 (挂载到 /static/)")
-	fmt.Println()
-	fmt.Println("  示例:")
-	fmt.Println("    port-test -p 8080")
-	fmt.Println("    port-test -p 8080,9090,3000")
-	fmt.Println("    port-test -p 8080 -code 403")
-	fmt.Println("    port-test -p 8080 -html ./index.html")
-	fmt.Println("    port-test -p 8080 -json '{\"code\":200,\"msg\":\"ok\"}'")
-	fmt.Println("    port-test -p 8080 -dir ./static")
-	fmt.Println()
-}
-
-// 打印 TCPing 模式帮助
-func printTcpingHelp() {
-	fmt.Println()
-	fmt.Println("  🗡️  TCPING 模式 - TCP 端口连通性测试")
-	fmt.Println("  ----------------------------------------")
-	fmt.Println("  主动连接目标 IP 的端口，测试网络是否畅通")
-	fmt.Println()
-	fmt.Println("  参数说明:")
-	fmt.Println("    -ip <host>      目标 IP 地址或域名 (必填)")
-	fmt.Println("    -p <ports>      端口号，支持逗号分隔和范围 (如: 80,443 或 1-1024)")
-	fmt.Println("    -timeout <sec>  连接超时时间，秒 (默认: 3)")
-	fmt.Println("    -count <num>    测试次数 (默认: 1)")
-	fmt.Println("    -interval <sec> 重试间隔，秒 (默认: 1)")
-	fmt.Println()
-	fmt.Println("  示例:")
-	fmt.Println("    port-test -mode tcping -ip 192.168.1.1 -p 80,443,3306")
-	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024")
-	fmt.Println("    port-test -mode tcping -ip 114.114.114.114 -p 53,80,443")
-	fmt.Println("    port-test -mode tcping -ip 192.168.1.1 -p 22,80 -count 3 -interval 2")
-	fmt.Println()
-}
-
 // 打印总帮助
 func printUsage() {
 	printHeader()
 	fmt.Println()
 	fmt.Println("  用法:")
-	fmt.Println("    port-test [选项]")
+	fmt.Println("    port-test [选项] [位置参数]")
 	fmt.Println()
 	fmt.Println("  模式:")
 	fmt.Println("    port      启动 HTTP 测试服务 (默认)")
 	fmt.Println("    tcping    TCP 端口连通性测试")
 	fmt.Println()
-	fmt.Println("  使用 'port-test -mode port' 进入 Port 模式")
-	fmt.Println("  使用 'port-test -mode tcping -ip <host> -p <ports>' 进入 TCPing 模式")
+	fmt.Println("  Port 模式 (默认):")
+	fmt.Println("    port-test                          默认启动 8080 端口")
+	fmt.Println("    port-test -mode port 8080           指定端口")
+	fmt.Println("    port-test -mode port 8080 9090      多个端口")
+	fmt.Println("    port-test -p 8080,9090              用 -p 指定多个端口")
+	fmt.Println("    port-test -p 8080 -code 403         指定状态码")
+	fmt.Println("    port-test -p 8080 -html index.html  指定 HTML 文件")
+	fmt.Println("    port-test -p 8080 -json '{\"code\":200,\"msg\":\"ok\"}'")
+	fmt.Println()
+	fmt.Println("  TCPing 模式:")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080        测试单个 host:port")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080 443   测试多个端口")
+	fmt.Println("    port-test -mode tcping 10.0.0.1 8080 443    host 和端口分开写")
+	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443,3306   传统写法")
+	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024        端口范围")
 	fmt.Println()
 	fmt.Println("  全局选项:")
-	fmt.Println("    -mode <mode>   运行模式: port (默认) / tcping")
-	fmt.Println("    -help          显示帮助信息")
-	fmt.Println("    -version       显示版本信息")
+	fmt.Println("    -mode <mode>     运行模式: port (默认) / tcping")
+	fmt.Println("    -timeout <sec>   连接超时时间 (tcping, 默认: 3)")
+	fmt.Println("    -count <num>     测试次数 (tcping, 默认: 1)")
+	fmt.Println("    -interval <sec>  重试间隔秒 (tcping, 默认: 1)")
+	fmt.Println("    -version         显示版本信息")
 	fmt.Println()
 }
 
 func main() {
 	// 解析命令行参数
-	portStr := flag.String("p", "8080", "端口号，多个端口用逗号分隔")
+	portStr := flag.String("p", "", "端口号，多个端口用逗号分隔")
 	code := flag.Int("code", 200, "HTTP 状态码")
 	jsonStr := flag.String("json", "", "JSON 响应内容")
 	htmlPath := flag.String("html", "", "HTML 文件路径")
 	staticDir := flag.String("dir", "", "静态文件目录")
-	
+
 	// 模式参数
 	mode := flag.String("mode", "port", "运行模式: port (默认) / tcping")
 	target := flag.String("ip", "", "目标IP地址 (tcping 模式)")
@@ -132,47 +101,122 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 如果没有指定模式或者没有额外参数，显示帮助
+	// 无参数时显示帮助
 	if len(os.Args) == 1 {
 		printUsage()
 		os.Exit(0)
 	}
 
+	// 获取位置参数（flag 解析后剩余的非 flag 参数）
+	posArgs := flag.Args()
+
 	// 根据模式运行
 	switch *mode {
 	case "tcping":
-		// TCPing 模式 - 先显示帮助，再执行
 		printHeader()
-		printTcpingHelp()
-		ports := parsePortRange(*portStr)
-		if len(ports) == 0 {
-			fmt.Println("  错误: 请指定端口号 (-p)")
-			fmt.Println("  提示: 使用 -p 80,443 或 -p 1-1024 指定端口")
-			os.Exit(1)
-		}
-		TcpingMode(*target, ports, time.Duration(*timeout)*time.Second, *count, time.Duration(*interval)*time.Second)
+		runTcpingMode(posArgs, *target, *portStr, *timeout, *count, *interval)
 
 	case "port":
-		// Port 模式 - 先显示帮助，再执行
 		printHeader()
-		printPortHelp()
-		runPortMode(*portStr, *code, *jsonStr, *htmlPath, *staticDir)
+		runPortMode(posArgs, *portStr, *code, *jsonStr, *htmlPath, *staticDir)
 
 	default:
 		fmt.Printf("未知模式: %s\n", *mode)
 		fmt.Println("可用模式: port (默认), tcping")
-		fmt.Println("使用 -help 查看帮助信息")
 		os.Exit(1)
 	}
 }
 
-// runPortMode 启动 Port 模式（HTTP 服务器）
-func runPortMode(portStr string, code int, jsonStr, htmlPath, staticDir string) {
-	// 解析端口
-	ports, err := parsePorts(portStr)
-	if err != nil {
-		fmt.Printf("  端口解析错误: %v\n", err)
+// runTcpingMode 解析位置参数并启动 tcping
+// 支持的写法:
+//   port-test -mode tcping 10.0.0.1:8080
+//   port-test -mode tcping 10.0.0.1:8080 443 8088
+//   port-test -mode tcping 10.0.0.1 8080 443
+//   port-test -mode tcping -ip 10.0.0.1 -p 80,443 (传统写法)
+func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int) {
+	target := flagIP
+	var ports []int
+
+	if len(posArgs) > 0 {
+		// 有位置参数，优先使用
+		first := posArgs[0]
+
+		// 第一个参数可能是 host:port 或纯 host
+		if strings.Contains(first, ":") {
+			parts := strings.SplitN(first, ":", 2)
+			target = strings.TrimSpace(parts[0])
+			if p, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+				ports = append(ports, p)
+			} else {
+				// 可能是 host:something 无效，当作 host 处理
+				target = first
+			}
+		} else {
+			target = first
+		}
+
+		// 后续位置参数都是端口
+		for _, arg := range posArgs[1:] {
+			arg = strings.TrimSpace(arg)
+			rangedPorts := parsePortRange(arg)
+			if len(rangedPorts) > 0 {
+				ports = append(ports, rangedPorts...)
+			}
+		}
+	}
+
+	// 如果位置参数没提供端口，回退到 -p flag
+	if len(ports) == 0 && flagPorts != "" {
+		ports = parsePortRange(flagPorts)
+	}
+
+	// 校验
+	if target == "" {
+		fmt.Println("  错误: 请指定目标地址")
+		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 port3 ...]")
+		fmt.Println("  或:   port-test -mode tcping -ip <host> -p <ports>")
 		os.Exit(1)
+	}
+	if len(ports) == 0 {
+		fmt.Println("  错误: 请指定端口号")
+		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 port3 ...]")
+		fmt.Println("  或:   port-test -mode tcping -ip <host> -p <ports>")
+		os.Exit(1)
+	}
+
+	TcpingMode(target, ports, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second)
+}
+
+// runPortMode 解析位置参数并启动 port 模式
+// 支持的写法:
+//   port-test -mode port 8080
+//   port-test -mode port 8080 9090 3000
+//   port-test -p 8080,9090 (传统写法)
+func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath, staticDir string) {
+	var ports []int
+
+	// 优先使用位置参数
+	for _, arg := range posArgs {
+		arg = strings.TrimSpace(arg)
+		rangedPorts := parsePortRange(arg)
+		if len(rangedPorts) > 0 {
+			ports = append(ports, rangedPorts...)
+		}
+	}
+
+	// 回退到 -p flag
+	if len(ports) == 0 && flagPorts != "" {
+		parsed, err := parsePorts(flagPorts)
+		if err != nil {
+			fmt.Printf("  端口解析错误: %v\n", err)
+			os.Exit(1)
+		}
+		ports = parsed
+	}
+
+	// 默认 8080
+	if len(ports) == 0 {
+		ports = []int{8080}
 	}
 
 	config = Config{
@@ -198,21 +242,16 @@ func runPortMode(portStr string, code int, jsonStr, htmlPath, staticDir string) 
 	if config.JSON != "" {
 		jsonContent = []byte(config.JSON)
 	} else {
-		resp := JSONResponse{
-			Code: 200,
-			Msg:  "hello",
-		}
+		resp := JSONResponse{Code: 200, Msg: "hello"}
 		data, _ := json.Marshal(resp)
 		jsonContent = data
 	}
 
 	// 打印启动信息
-	fmt.Println("  🛡️  启动 Port 模式")
-	fmt.Println("  ----------------------------------------")
 	fmt.Printf("  端口: %v\n", config.Ports)
 	fmt.Printf("  状态码: %d\n", config.Code)
 	fmt.Printf("  响应类型: %s\n", getResponseType())
-	fmt.Println("  ----------------------------------------")
+	fmt.Println("  ------------------------------------")
 
 	// 启动 HTTP 服务器
 	var wg sync.WaitGroup
@@ -228,19 +267,16 @@ func runPortMode(portStr string, code int, jsonStr, htmlPath, staticDir string) 
 		}(port)
 	}
 
-	// 等待所有服务器启动或出错
 	go func() {
 		wg.Wait()
 		close(errCh)
 	}()
 
-	// 检查启动错误
 	for err := range errCh {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	// 保持运行
 	select {}
 }
 
@@ -271,7 +307,6 @@ func startServer(port int) error {
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/info", handleInfo)
 
-	// 静态文件服务（如果指定目录）
 	if config.StaticDir != "" {
 		if _, err := os.Stat(config.StaticDir); err == nil {
 			mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(config.StaticDir))))
@@ -291,7 +326,6 @@ func startServer(port int) error {
 
 // handleRoot 根路径处理器
 func handleRoot(w http.ResponseWriter, r *http.Request) {
-	// 如果指定了 HTML 文件，返回 HTML
 	if htmlContent != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(getStatusCode())
@@ -299,7 +333,6 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 返回 JSON
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(getStatusCode())
 	if len(jsonContent) > 0 {
