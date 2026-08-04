@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}-${{ matrix.arch }}-${matrix.notes}}
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.notes }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -102,7 +102,7 @@ jobs:
         GOARCH: ${{ matrix.arch }}
       run: |
         output_name="port-test-v${{ steps.date.outputs.date }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
-        go build -ldflags="-s -w" -o "$output_name" main.go
+        go build -ldflags="-s -w" -o "$output_name" .
         echo "Built: $output_name"
 
     - name: Upload artifact
