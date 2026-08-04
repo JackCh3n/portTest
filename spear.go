@@ -29,30 +29,38 @@ type ScanResult struct {
 	TotalTime time.Duration `json:"total_time"`
 }
 
-// TcpingMode TCPing 模式 - TCP 端口连通性测试
+// HostTarget 多主机目标
+type HostTarget struct {
+	Host  string
+	Ports []int
+}
+
+// MultiTcpingMode 多主机 TCPing 测试
+func MultiTcpingMode(targets []HostTarget, timeout time.Duration, count int, interval time.Duration) {
+	for i, t := range targets {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("  🗡️  目标 %d: %s\n", i+1, t.Host)
+		fmt.Printf("  端口: %v\n", t.Ports)
+		fmt.Printf("  超时: %v\n", timeout)
+		if count > 1 {
+			fmt.Printf("  次数: %d (间隔 %v)\n", count, interval)
+		}
+		fmt.Println("  ------------------------------------")
+
+		if count <= 1 {
+			result := scanTarget(t.Host, t.Ports, timeout)
+			printResult(result)
+		} else {
+			continuousScan(t.Host, t.Ports, timeout, count, interval)
+		}
+	}
+}
+
+// TcpingMode TCPing 模式 - TCP 端口连通性测试 (单主机, 向后兼容)
 func TcpingMode(target string, ports []int, timeout time.Duration, count int, interval time.Duration) {
-	if target == "" {
-		fmt.Println("  错误: 请使用 -ip 指定目标IP地址")
-		fmt.Println("  提示: port-test -mode tcping -ip <host> -p <ports>")
-		return
-	}
-
-	fmt.Printf("  目标: %s\n", target)
-	fmt.Printf("  端口: %v\n", ports)
-	fmt.Printf("  超时: %v\n", timeout)
-	if count > 1 {
-		fmt.Printf("  次数: %d (间隔 %v)\n", count, interval)
-	}
-	fmt.Println("  ------------------------------------")
-
-	if count <= 1 {
-		// 单次扫描
-		result := scanTarget(target, ports, timeout)
-		printResult(result)
-	} else {
-		// 重复扫描
-		continuousScan(target, ports, timeout, count, interval)
-	}
+	MultiTcpingMode([]HostTarget{{Host: target, Ports: ports}}, timeout, count, interval)
 }
 
 // scanTarget 对目标执行单次端口扫描

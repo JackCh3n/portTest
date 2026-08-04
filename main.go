@@ -63,11 +63,13 @@ func printUsage() {
 	fmt.Println("    port-test -p 8080 -json '{\"code\":200,\"msg\":\"ok\"}'")
 	fmt.Println()
 	fmt.Println("  TCPing 模式:")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080        测试单个 host:port")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080 443   测试多个端口")
-	fmt.Println("    port-test -mode tcping 10.0.0.1 8080 443    host 和端口分开写")
-	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443,3306   传统写法")
-	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024        端口范围")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080               单主机单端口")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080,443           单主机多端口(逗号)")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080 443 8088      单主机多端口(空格)")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080|10.0.0.2:443  多主机用|分隔")
+	fmt.Println("    port-test -mode tcping 10.0.0.1:8080,443|10.0.0.2:9999  多主机多端口")
+	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443     传统写法")
+	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024     端口范围")
 	fmt.Println()
 	fmt.Println("  全局选项:")
 	fmt.Println("    -mode <mode>     运行模式: port (默认) / tcping")
@@ -129,62 +131,92 @@ func main() {
 
 // runTcpingMode 解析位置参数并启动 tcping
 // 支持的写法:
-//   port-test -mode tcping 10.0.0.1:8080
-//   port-test -mode tcping 10.0.0.1:8080 443 8088
-//   port-test -mode tcping 10.0.0.1 8080 443
-//   port-test -mode tcping -ip 10.0.0.1 -p 80,443 (传统写法)
+//   port-test -mode tcping 10.0.0.1:8080                    单主机单端口
+//   port-test -mode tcping 10.0.0.1:8080,443               单主机多端口(逗号)
+//   port-test -mode tcping 10.0.0.1:8080 443 8088          单主机多端口(空格)
+//   port-test -mode tcping 10.0.0.1 8080 443               host和端口分开
+//   port-test -mode tcping 10.0.0.1:8080|10.0.0.2:443      多主机用|分隔
+//   port-test -mode tcping 10.0.0.1:8080,443|10.0.0.2:9999 多主机多端口
+//   port-test -mode tcping -ip 10.0.0.1 -p 80,443           传统写法
 func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int) {
-	target := flagIP
-	var ports []int
+	var targets []HostTarget
 
 	if len(posArgs) > 0 {
-		// 有位置参数，优先使用
-		first := posArgs[0]
+		// 合并所有位置参数为一个字符串
+		joined := strings.Join(posArgs, " ")
 
-		// 第一个参数可能是 host:port 或纯 host
-		if strings.Contains(first, ":") {
-			parts := strings.SplitN(first, ":", 2)
-			target = strings.TrimSpace(parts[0])
-			if p, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
-				ports = append(ports, p)
-			} else {
-				// 可能是 host:something 无效，当作 host 处理
-				target = first
+		// 按 | 分割多主机
+		hostSegs := strings.Split(joined, "|")
+		for i, seg := range hostSegs {
+			seg = strings.TrimSpace(seg)
+			if seg == "" {
+				continue
 			}
-		} else {
-			target = first
-		}
-
-		// 后续位置参数都是端口
-		for _, arg := range posArgs[1:] {
-			arg = strings.TrimSpace(arg)
-			rangedPorts := parsePortRange(arg)
-			if len(rangedPorts) > 0 {
-				ports = append(ports, rangedPorts...)
+			ht := parseHostSegment(seg)
+			if i == len(hostSegs)-1 && len(hostSegs) > 1 {
+				// 最后一段，如果有裸端口，附加到最后一个主机
+				// parseHostSegment 已经处理了
+			}
+			if ht.Host != "" {
+				targets = append(targets, ht)
 			}
 		}
 	}
 
-	// 如果位置参数没提供端口，回退到 -p flag
-	if len(ports) == 0 && flagPorts != "" {
-		ports = parsePortRange(flagPorts)
+	// 回退到传统 -ip -p 写法
+	if len(targets) == 0 && flagIP != "" {
+		ht := HostTarget{Host: flagIP}
+		if flagPorts != "" {
+			ht.Ports = parsePortRange(flagPorts)
+		}
+		targets = append(targets, ht)
 	}
 
 	// 校验
-	if target == "" {
+	if len(targets) == 0 {
 		fmt.Println("  错误: 请指定目标地址")
-		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 port3 ...]")
+		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 ...] [| host2:port ...]")
 		fmt.Println("  或:   port-test -mode tcping -ip <host> -p <ports>")
 		os.Exit(1)
 	}
-	if len(ports) == 0 {
-		fmt.Println("  错误: 请指定端口号")
-		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 port3 ...]")
-		fmt.Println("  或:   port-test -mode tcping -ip <host> -p <ports>")
-		os.Exit(1)
+	for i := range targets {
+		if len(targets[i].Ports) == 0 {
+			fmt.Printf("  错误: 主机 %s 未指定端口\n", targets[i].Host)
+			os.Exit(1)
+		}
 	}
 
-	TcpingMode(target, ports, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second)
+	MultiTcpingMode(targets, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second)
+}
+
+// parseHostSegment 解析单个主机段
+// 支持: "10.0.0.1:8080,443", "10.0.0.1:8080 443", "10.0.0.1 8080 443"
+func parseHostSegment(seg string) HostTarget {
+	ht := HostTarget{}
+	parts := strings.Fields(seg)
+	if len(parts) == 0 {
+		return ht
+	}
+
+	first := parts[0]
+	if strings.Contains(first, ":") {
+		// host:port 格式
+		colonParts := strings.SplitN(first, ":", 2)
+		ht.Host = strings.TrimSpace(colonParts[0])
+		portStr := strings.TrimSpace(colonParts[1])
+		// 逗号分隔的端口
+		ht.Ports = append(ht.Ports, parsePortRange(portStr)...)
+	} else {
+		// 纯 host
+		ht.Host = first
+	}
+
+	// 后续部分都是端口
+	for _, p := range parts[1:] {
+		ht.Ports = append(ht.Ports, parsePortRange(p)...)
+	}
+
+	return ht
 }
 
 // runPortMode 解析位置参数并启动 port 模式
