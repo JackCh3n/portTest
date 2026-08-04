@@ -150,7 +150,7 @@ func main() {
 			fmt.Println("  提示: 使用 -p 80,443 或 -p 1-1024 指定端口")
 			os.Exit(1)
 		}
-		SpearMode(*target, ports, time.Duration(*timeout)*time.Second, *count, time.Duration(*interval)*time.Second)
+		TcpingMode(*target, ports, time.Duration(*timeout)*time.Second, *count, time.Duration(*interval)*time.Second)
 
 	case "port":
 		// Port 模式 - 先显示帮助，再执行

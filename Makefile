@@ -41,6 +41,6 @@ build-all:
 local:
 	GOOS=windows GOARCH=386 go build -o port-test-win-x86.exe main.go
 
-# 矛模式测试
-spear-test:
-	go run main.go -mode spear -ip 127.0.0.1 -p 80,443,3306
+# TCPing 模式测试
+tcping-test:
+	go run main.go -mode tcping -ip 127.0.0.1 -p 80,443,3306

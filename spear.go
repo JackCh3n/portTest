@@ -29,8 +29,8 @@ type ScanResult struct {
 	TotalTime time.Duration `json:"total_time"`
 }
 
-// SpearMode 矛模式 - TCPing 端口测试
-func SpearMode(target string, ports []int, timeout time.Duration, count int, interval time.Duration) {
+// TcpingMode TCPing 模式 - TCP 端口连通性测试
+func TcpingMode(target string, ports []int, timeout time.Duration, count int, interval time.Duration) {
 	if target == "" {
 		fmt.Println("  错误: 请使用 -ip 指定目标IP地址")
 		fmt.Println("  提示: port-test -mode tcping -ip <host> -p <ports>")

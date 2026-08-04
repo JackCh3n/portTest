@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestSpearMode(t *testing.T) {
+func TestTcpingMode(t *testing.T) {
 	// 测试本地已知端口
 	ports := []int{80, 443, 8080}
 	timeout := 3 * time.Second
