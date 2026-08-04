@@ -1,0 +1,22 @@
+# Binaries
+port-test
+port-test-*.exe
+port-test-*
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+*.log
+
+# Windows reserved
+nul

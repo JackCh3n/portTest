@@ -1,0 +1,143 @@
+name: Build Release
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}-${matrix.notes}}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows
+            arch: amd64
+            ext: .exe
+          - os: windows
+            arch: "386"
+            ext: .exe
+            notes: x86
+          - os: windows
+            arch: arm64
+            ext: .exe
+          
+          # Linux x86/x64
+          - os: linux
+            arch: amd64
+            ext: ""
+          - os: linux
+            arch: "386"
+            ext: ""
+            notes: x86
+          
+          # Linux ARM
+          - os: linux
+            arch: arm64
+            ext: ""
+          - os: linux
+            arch: arm
+            ext: ""
+          
+          # Linux MIPS (国产芯片支持)
+          - os: linux
+            arch: mips64
+            ext: ""
+          - os: linux
+            arch: mips64le
+            ext: ""
+          - os: linux
+            arch: mips
+            ext: ""
+          - os: linux
+            arch: mipsle
+            ext: ""
+          
+          # Linux LoongArch (龙芯)
+          - os: linux
+            arch: loong64
+            ext: ""
+          
+          # macOS
+          - os: darwin
+            arch: amd64
+            ext: ""
+          - os: darwin
+            arch: arm64
+            ext: ""
+          
+          # FreeBSD
+          - os: freebsd
+            arch: amd64
+            ext: ""
+          - os: freebsd
+            arch: arm64
+            ext: ""
+          
+          # OpenBSD
+          - os: openbsd
+            arch: amd64
+            ext: ""
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y_%m%d_%H%M')" >> $GITHUB_OUTPUT
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+      run: |
+        output_name="port-test-v${{ steps.date.outputs.date }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+        go build -ldflags="-s -w" -o "$output_name" main.go
+        echo "Built: $output_name"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: port-test-v${{ steps.date.outputs.date }}-${{ matrix.os }}-${{ matrix.arch }}
+        path: port-test-v${{ steps.date.outputs.date }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y_%m%d_%H%M')" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.date.outputs.date }}
+        name: v${{ steps.date.outputs.date }}
+        draft: false
+        prerelease: false
+        files: ./artifacts/**/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
