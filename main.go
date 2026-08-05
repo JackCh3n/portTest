@@ -261,9 +261,14 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	// 优先使用位置参数
 	for _, arg := range posArgs {
 		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
 		rangedPorts := parsePortRange(arg)
 		if len(rangedPorts) > 0 {
 			ports = append(ports, rangedPorts...)
+		} else {
+			fmt.Printf("  警告: 忽略无效端口: %q\n", arg)
 		}
 	}
 
@@ -281,6 +286,15 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	if len(ports) == 0 {
 		ports = []int{8080}
 	}
+
+	// 校验 HTTP 状态码（Go 要求 100-999，否则 WriteHeader panic）
+	if code < 100 || code > 999 {
+		fmt.Printf("  错误: 无效 HTTP 状态码: %d (有效范围 100-999)\n", code)
+		os.Exit(1)
+	}
+
+	// 去重端口，避免同一端口重复启动导致监听冲突
+	ports = dedupePorts(ports)
 
 	config = Config{
 		Ports:     ports,
@@ -374,16 +388,22 @@ func startServer(port int) error {
 	mux.HandleFunc("/info", handleInfo)
 
 	if config.StaticDir != "" {
-		if _, err := os.Stat(config.StaticDir); err == nil {
+		if info, err := os.Stat(config.StaticDir); err == nil && info.IsDir() {
 			mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(config.StaticDir))))
 			fmt.Printf("  静态文件目录: %s\n", config.StaticDir)
+		} else {
+			fmt.Printf("  警告: 静态目录不存在或不是目录: %s\n", config.StaticDir)
 		}
 	}
 
 	addr := fmt.Sprintf(":%d", port)
 	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	fmt.Printf("  服务器启动: http://localhost:%d\n", port)
@@ -409,8 +429,9 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 // getStatusCode 获取有效的 HTTP 状态码
+// Go 的 WriteHeader 要求状态码在 100-999 之间，否则会 panic
 func getStatusCode() int {
-	if config.Code > 0 {
+	if config.Code >= 100 && config.Code <= 999 {
 		return config.Code
 	}
 	return 200
@@ -429,7 +450,7 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 		"status":    "running",
 		"timestamp": time.Now().Format(time.RFC3339),
 		"ports":     config.Ports,
-		"code":      config.Code,
+		"code":      getStatusCode(),
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -449,18 +470,18 @@ func getResponseType() string {
 
 // splitMultiHost 按多主机分隔符切分
 // 支持: ! # = + \ / ? (均为非 shell 保留字符, 不需要引号)
+// 多个分隔符可以混用，统一替换后按单个分隔符切分
 func splitMultiHost(s string) []string {
-	var best []string
+	hasSep := false
 	for _, sep := range []string{"!", "#", "=", "+", "\\", "/", "?"} {
 		if strings.Contains(s, sep) {
-			parts := strings.Split(s, sep)
-			if len(parts) > len(best) {
-				best = parts
-			}
+			hasSep = true
+			// 统一替换为空格，这样所有分隔符可以混用
+			s = strings.ReplaceAll(s, sep, " ")
 		}
 	}
-	if best != nil {
-		return best
+	if hasSep {
+		return strings.Fields(s)
 	}
 	return []string{s}
 }

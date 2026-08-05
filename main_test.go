@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -153,5 +154,96 @@ func TestGetResponseType(t *testing.T) {
 	htmlContent = []byte("test")
 	if got := getResponseType(); got != "HTML" {
 		t.Errorf("getResponseType() = %q, want %q", got, "HTML")
+	}
+}
+
+// TestStatusCodeValidation 验证非法状态码不会导致 WriteHeader panic
+func TestStatusCodeValidation(t *testing.T) {
+	// 非法状态码（<100 或 >999）应回退到 200，而不是 panic
+	invalid := []int{0, 50, 99, 1000, 99999}
+	for _, code := range invalid {
+		config = Config{Code: code}
+		jsonContent = []byte(`{}`)
+		htmlContent = nil
+		if got := getStatusCode(); got != 200 {
+			t.Errorf("getStatusCode() with Code=%d = %d, want 200 (回退)", code, got)
+		}
+	}
+
+	// 合法状态码应原样返回
+	valid := []int{100, 200, 302, 404, 500, 999}
+	for _, code := range valid {
+		config = Config{Code: code}
+		if got := getStatusCode(); got != code {
+			t.Errorf("getStatusCode() with Code=%d = %d, want %d", code, got, code)
+		}
+	}
+}
+
+// TestHandleRootNoPanic 确保非法 Code 下 handleRoot 不 panic
+func TestHandleRootNoPanic(t *testing.T) {
+	config = Config{Code: 50}
+	jsonContent = []byte(`{}`)
+	htmlContent = nil
+
+	// 用 httptest 真实触发 WriteHeader
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	handleRoot(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("handleRoot with Code=50 应回退为 200，实际 = %d", rec.Code)
+	}
+}
+
+// TestSplitMultiHost 验证多分隔符混用
+func TestSplitMultiHost(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"10.0.0.1:8080", []string{"10.0.0.1:8080"}},
+		{"10.0.0.1:8080#10.0.0.2:443", []string{"10.0.0.1:8080", "10.0.0.2:443"}},
+		{"10.0.0.1:8080!10.0.0.2:443", []string{"10.0.0.1:8080", "10.0.0.2:443"}},
+		// 混用分隔符
+		{"10.0.0.1:8080#10.0.0.2:443!10.0.0.3:80", []string{"10.0.0.1:8080", "10.0.0.2:443", "10.0.0.3:80"}},
+	}
+
+	for _, tt := range tests {
+		got := splitMultiHost(tt.input)
+		if len(got) != len(tt.expected) {
+			t.Errorf("splitMultiHost(%q) = %v, want %v", tt.input, got, tt.expected)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.expected[i] {
+				t.Errorf("splitMultiHost(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.expected[i])
+			}
+		}
+	}
+}
+
+// TestDedupePorts 验证端口去重
+func TestDedupePorts(t *testing.T) {
+	tests := []struct {
+		input    []int
+		expected []int
+	}{
+		{[]int{8080, 8080}, []int{8080}},
+		{[]int{8080, 9090, 8080}, []int{8080, 9090}},
+		{[]int{80, 443, 80, 443}, []int{80, 443}},
+	}
+
+	for _, tt := range tests {
+		got := dedupePorts(tt.input)
+		if len(got) != len(tt.expected) {
+			t.Errorf("dedupePorts(%v) = %v, want %v", tt.input, got, tt.expected)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.expected[i] {
+				t.Errorf("dedupePorts(%v)[%d] = %d, want %d", tt.input, i, got[i], tt.expected[i])
+			}
+		}
 	}
 }
