@@ -1,0 +1,59 @@
+# ============================================================
+# Port Test Tool - CNB 流水线配置（.cnb.yml）
+# 与 .github/workflows/build.yml（GitHub Actions）功能对齐：
+#   - PR：go vet + go test 检查
+#   - push 到 main/master：跨平台编译全平台二进制 → 创建 Release
+#     （标签格式 v年_月日_时分，与 GitHub Actions 一致）→ 上传二进制附件
+# ============================================================
+
+# 公共配置：Go 构建环境
+.go-env: &go-env
+  docker:
+    image: golang:1.22
+
+# push → 构建 + Release 的流水线模板
+.build-and-release: &build-and-release
+  name: build-and-release
+  <<: *go-env
+  stages:
+    - name: compute release tag
+      script: echo "##[set-output RELEASE_TAG=v$(date +'%Y_%m%d_%H%M')]"
+      exports:
+        RELEASE_TAG: RELEASE_TAG
+    - name: run tests
+      script: go test ./...
+    - name: build all binaries
+      script: ./build.sh all
+    - name: create release
+      type: git:release
+      options:
+        tag: $RELEASE_TAG
+        title: $RELEASE_TAG
+        description: "Port Test Tool 自动发布 $RELEASE_TAG"
+        latest: true
+    - name: upload release assets
+      image: cnbcool/attachments:latest
+      settings:
+        tag: $RELEASE_TAG
+        attachments:
+          - "./dist/*"
+
+# ---------- PR 检查：vet + 单测 ----------
+"**":
+  pull_request:
+    - name: pr-check
+      <<: *go-env
+      stages:
+        - name: go vet
+          script: go vet ./...
+        - name: run tests
+          script: go test -v ./...
+
+# ---------- push 到 main / master：构建 + 生成 Release ----------
+main:
+  push:
+    - *build-and-release
+
+master:
+  push:
+    - *build-and-release
