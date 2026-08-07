@@ -1,4 +1,4 @@
-.PHONY: build clean test run
+.PHONY: build clean test run tcping-test curl-test scan-test bench-test udp-test dns-test traceroute-test
 
 # 默认构建当前平台
 build:
@@ -48,3 +48,23 @@ tcping-test:
 # CURL 模式测试
 curl-test:
 	go run . -curl https://www.baidu.com -k
+
+# SCAN 模式测试
+scan-test:
+	go run . -scan 127.0.0.1 -timeout 2
+
+# BENCH 模式测试
+bench-test:
+	go run . -bench https://www.baidu.com -n 50 -c 10 -k -timeout 10
+
+# UDP 模式测试
+udp-test:
+	go run . -udp 127.0.0.1 53,123 -timeout 1
+
+# DNS 模式测试
+dns-test:
+	go run . -dns baidu.com
+
+# TRACEROUTE 模式测试（需管理员/root）
+traceroute-test:
+	go run . -traceroute 8.8.8.8 -m 5 -w 1

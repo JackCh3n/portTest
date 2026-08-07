@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -47,14 +48,14 @@ func printUsage() {
 	printHeader()
 	fmt.Println()
 	fmt.Println("  用法:")
-	fmt.Println("    port-test -port [端口...]    启动 HTTP 测试服务")
-	fmt.Println("    port-test -tcping <目标...>  TCP 端口连通性测试")
-	fmt.Println("    port-test -curl <URL>        模拟 curl 抓取网页内容")
-	fmt.Println()
-	fmt.Println("  模式说明:")
-	fmt.Println("    -port     启动 HTTP 测试服务 (占用指定端口并返回 JSON/HTML/状态码)")
-	fmt.Println("    -tcping   TCP 端口连通性测试")
-	fmt.Println("    -curl     模拟 curl 发送 HTTP/HTTPS 请求并输出响应")
+	fmt.Println("    port-test -port [端口...]      启动 HTTP 测试服务")
+	fmt.Println("    port-test -tcping <目标...>    TCP 端口连通性测试")
+	fmt.Println("    port-test -curl <URL>          模拟 curl 抓取网页内容")
+	fmt.Println("    port-test -scan <主机>         快速端口扫描")
+	fmt.Println("    port-test -bench <URL>         轻量 HTTP 压测")
+	fmt.Println("    port-test -udp <目标...>       UDP 连通性测试")
+	fmt.Println("    port-test -dns <域名>          DNS 记录查询")
+	fmt.Println("    port-test -traceroute <主机>   路由追踪")
 	fmt.Println()
 	fmt.Println("  Port 模式:")
 	fmt.Println("    port-test -port 8080                          指定端口")
@@ -63,6 +64,7 @@ func printUsage() {
 	fmt.Println("    port-test -p 8080 -code 403                   指定状态码")
 	fmt.Println("    port-test -p 8080 -html index.html            指定 HTML 文件")
 	fmt.Println("    port-test -p 8080 -json '{\"code\":200,\"msg\":\"ok\"}'")
+	fmt.Println("    /echo 接口: 回显请求的 method/header/body (配合 curl 调试)")
 	fmt.Println()
 	fmt.Println("  TCPing 模式:")
 	fmt.Println("    port-test -tcping 10.0.0.1:8080               单主机单端口")
@@ -82,18 +84,46 @@ func printUsage() {
 	fmt.Println("    port-test -curl http://api.com/json -X POST -d '{\"k\":1}' -H 'Content-Type: application/json'")
 	fmt.Println("    port-test -curl http://api.com -H 'Authorization: Bearer xxx' -H 'X-Custom: 1'")
 	fmt.Println()
+	fmt.Println("  SCAN 模式 (端口扫描):")
+	fmt.Println("    port-test -scan 10.0.0.1                 扫描常见端口")
+	fmt.Println("    port-test -scan 10.0.0.1 -p 1-1024       扫描指定范围")
+	fmt.Println("    port-test -scan 10.0.0.1 -p 1-65535      全端口扫描")
+	fmt.Println()
+	fmt.Println("  BENCH 模式 (HTTP 压测):")
+	fmt.Println("    port-test -bench https://example.com                  100请求/10并发")
+	fmt.Println("    port-test -bench https://example.com -n 1000 -c 50    1000请求/50并发")
+	fmt.Println("    port-test -bench http://api.com/login -X POST -d 'a=1'")
+	fmt.Println()
+	fmt.Println("  UDP 模式:")
+	fmt.Println("    port-test -udp 10.0.0.1:53            测试 UDP 端口 (DNS)")
+	fmt.Println("    port-test -udp 10.0.0.1 53,123        多端口")
+	fmt.Println()
+	fmt.Println("  DNS 模式:")
+	fmt.Println("    port-test -dns example.com            查询所有记录")
+	fmt.Println("    port-test -dns example.com -type A    仅查询 A 记录")
+	fmt.Println("    port-test -dns example.com -ip 8.8.8.8 指定 DNS 服务器")
+	fmt.Println()
+	fmt.Println("  TRACEROUTE 模式 (需管理员/root):")
+	fmt.Println("    port-test -traceroute 10.0.0.1                   UDP 追踪")
+	fmt.Println("    port-test -traceroute example.com -T -p 443      TCP 追踪 443 端口")
+	fmt.Println("    port-test -traceroute example.com -m 20 -w 2     最大20跳/超时2秒")
+	fmt.Println()
 	fmt.Println("  全局选项:")
-	fmt.Println("    -port <ports...>   启动 HTTP 测试服务")
-	fmt.Println("    -tcping <targets>  TCP 端口连通性测试")
-	fmt.Println("    -curl <url>        模拟 curl 请求")
-	fmt.Println("    -timeout <sec>     连接超时时间 (tcping/curl, 默认: 3)")
-	fmt.Println("    -count <num>       测试次数 (tcping, 默认: 1)")
-	fmt.Println("    -interval <sec>    重试间隔秒 (tcping, 默认: 1)")
-	fmt.Println("    -X <method>        HTTP 方法 (curl, 默认: GET)")
-	fmt.Println("    -d <data>          请求体 (curl, POST 时自动加 Content-Type)")
-	fmt.Println("    -H <header>        HTTP 请求头, 可多次指定 (curl)")
-	fmt.Println("    -k                 忽略 HTTPS 证书校验 (curl)")
-	fmt.Println("    -version           显示版本信息")
+	fmt.Println("    -timeout <sec>    连接超时时间 (tcping/curl/scan/udp/traceroute, 默认: 3)")
+	fmt.Println("    -count <num>      测试次数 (tcping, 默认: 1)")
+	fmt.Println("    -interval <sec>   重试间隔秒 (tcping, 默认: 1)")
+	fmt.Println("    -X <method>       HTTP 方法 (curl/bench, 默认: GET)")
+	fmt.Println("    -d <data>         请求体 (curl/bench, POST 时自动加 Content-Type)")
+	fmt.Println("    -H <header>       HTTP 请求头, 可多次指定 (curl/bench)")
+	fmt.Println("    -k                忽略 HTTPS 证书校验 (curl/bench)")
+	fmt.Println("    -n <num>          总请求数 (bench, 默认: 100)")
+	fmt.Println("    -c <num>          并发数 (bench, 默认: 10)")
+	fmt.Println("    -type <type>      DNS 记录类型 (dns, 默认: 全部)")
+	fmt.Println("    -ip <host>        目标地址 (tcping) 或 DNS 服务器 (dns)")
+	fmt.Println("    -T                TCP 模式 (traceroute)")
+	fmt.Println("    -m <num>          最大跳数 (traceroute, 默认: 30)")
+	fmt.Println("    -w <sec>          每跳超时 (traceroute, 默认: 1)")
+	fmt.Println("    -version          显示版本信息")
 	fmt.Println()
 }
 
@@ -109,19 +139,36 @@ func main() {
 	usePort := flag.Bool("port", false, "Port 模式: 启动 HTTP 测试服务")
 	useTcping := flag.Bool("tcping", false, "TCPing 模式: TCP 端口连通性测试")
 	useCurl := flag.Bool("curl", false, "CURL 模式: 模拟 curl 抓取内容")
+	useScan := flag.Bool("scan", false, "SCAN 模式: 快速端口扫描")
+	useBench := flag.Bool("bench", false, "BENCH 模式: 轻量 HTTP 压测")
+	useUdp := flag.Bool("udp", false, "UDP 模式: UDP 连通性测试")
+	useDns := flag.Bool("dns", false, "DNS 模式: DNS 记录查询")
+	useTraceroute := flag.Bool("traceroute", false, "TRACEROUTE 模式: 路由追踪")
 
 	// TCPing 参数
-	target := flag.String("ip", "", "目标IP地址 (tcping 模式)")
-	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping/curl 模式)")
+	target := flag.String("ip", "", "目标IP地址 (tcping 模式) 或 DNS 服务器 (dns 模式)")
+	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping/curl/scan/udp/traceroute 模式)")
 	count := flag.Int("count", 1, "测试次数 (tcping 模式)")
 	interval := flag.Int("interval", 1, "重试间隔(秒, tcping 模式)")
 
-	// CURL 参数
-	method := flag.String("X", "", "HTTP 方法 (curl 模式, 默认 GET)")
-	data := flag.String("d", "", "请求体 (curl 模式)")
+	// CURL/BENCH 参数
+	method := flag.String("X", "", "HTTP 方法 (curl/bench 模式, 默认 GET)")
+	data := flag.String("d", "", "请求体 (curl/bench 模式)")
 	var headers headerList
-	flag.Var(&headers, "H", "HTTP 请求头, 可多次指定 (curl 模式)")
-	insecure := flag.Bool("k", false, "忽略 HTTPS 证书校验 (curl 模式)")
+	flag.Var(&headers, "H", "HTTP 请求头, 可多次指定 (curl/bench 模式)")
+	insecure := flag.Bool("k", false, "忽略 HTTPS 证书校验 (curl/bench 模式)")
+
+	// BENCH 参数
+	benchTotal := flag.Int("n", 100, "总请求数 (bench 模式, 默认: 100)")
+	benchConcurrency := flag.Int("c", 10, "并发数 (bench 模式, 默认: 10)")
+
+	// DNS 参数
+	dnsType := flag.String("type", "", "DNS 记录类型 (dns 模式, 默认: 全部)")
+
+	// TRACEROUTE 参数
+	trTcp := flag.Bool("T", false, "TCP 模式 (traceroute)")
+	trMaxHops := flag.Int("m", 30, "最大跳数 (traceroute, 默认: 30)")
+	trWait := flag.Int("w", 1, "每跳超时秒 (traceroute, 默认: 1)")
 
 	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
@@ -139,24 +186,35 @@ func main() {
 	// Go flag 包在遇到第一个非 flag 参数后停止解析，URL 后面的 flag 会残留在位置参数中
 	posArgs = extractTrailingFlags(posArgs,
 		&flagOpts{
-			timeout:   timeout,
-			count:     count,
-			interval:  interval,
-			ip:        target,
-			portStr:   portStr,
-			method:    method,
-			data:      data,
-			headers:   &headers,
-			insecure:  insecure,
-			code:      code,
-			usePort:   usePort,
-			useTcping: useTcping,
-			useCurl:   useCurl,
+			timeout:       timeout,
+			count:         count,
+			interval:      interval,
+			ip:            target,
+			portStr:       portStr,
+			method:        method,
+			data:          data,
+			headers:       &headers,
+			insecure:      insecure,
+			code:          code,
+			usePort:       usePort,
+			useTcping:     useTcping,
+			useCurl:       useCurl,
+			useScan:       useScan,
+			useBench:      useBench,
+			useUdp:        useUdp,
+			useDns:        useDns,
+			useTraceroute: useTraceroute,
+			benchTotal:    benchTotal,
+			benchConc:     benchConcurrency,
+			dnsType:       dnsType,
+			trTcp:         trTcp,
+			trMaxHops:     trMaxHops,
+			trWait:        trWait,
 		})
 
 	// 无任何模式开关且无位置参数时显示帮助
 	// 兼容旧用法: 只带 -p/-code 等参数时默认走 port 模式
-	if !*usePort && !*useTcping && !*useCurl {
+	if !*usePort && !*useTcping && !*useCurl && !*useScan && !*useBench && !*useUdp && !*useDns && !*useTraceroute {
 		if len(posArgs) == 0 && *portStr == "" && *target == "" {
 			printUsage()
 			os.Exit(0)
@@ -167,17 +225,13 @@ func main() {
 
 	// 同时指定多个模式时报错
 	modes := 0
-	if *usePort {
-		modes++
-	}
-	if *useTcping {
-		modes++
-	}
-	if *useCurl {
-		modes++
+	for _, m := range []bool{*usePort, *useTcping, *useCurl, *useScan, *useBench, *useUdp, *useDns, *useTraceroute} {
+		if m {
+			modes++
+		}
 	}
 	if modes > 1 {
-		fmt.Println("  错误: 只能指定一种模式 (-port / -tcping / -curl 互斥)")
+		fmt.Println("  错误: 只能指定一种模式 (-port / -tcping / -curl / -scan / -bench / -udp / -dns / -traceroute 互斥)")
 		os.Exit(1)
 	}
 
@@ -190,6 +244,31 @@ func main() {
 	case *useTcping:
 		printHeader()
 		runTcpingMode(posArgs, *target, *portStr, *timeout, *count, *interval)
+
+	case *useScan:
+		printHeader()
+		runScanMode(posArgs, *portStr, *timeout)
+
+	case *useBench:
+		printHeader()
+		runBenchMode(posArgs, *method, *data, headers, *insecure, *timeout, *benchTotal, *benchConcurrency)
+
+	case *useUdp:
+		printHeader()
+		runUdpMode(posArgs, *portStr, *timeout)
+
+	case *useDns:
+		printHeader()
+		runDnsMode(posArgs, *dnsType, *target)
+
+	case *useTraceroute:
+		printHeader()
+		// traceroute 端口从 -p 解析（与 scan/tcping 共用）
+		trPort := 0
+		if p, err := strconv.Atoi(strings.TrimSpace(*portStr)); err == nil {
+			trPort = p
+		}
+		runTracerouteMode(posArgs, *trTcp, trPort, *trMaxHops, *trWait)
 
 	default: // *usePort
 		printHeader()
@@ -452,6 +531,7 @@ func startServer(port int) error {
 	mux.HandleFunc("/", handleRoot)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/info", handleInfo)
+	mux.HandleFunc("/echo", handleEcho)
 
 	if config.StaticDir != "" {
 		if info, err := os.Stat(config.StaticDir); err == nil && info.IsDir() {
@@ -523,6 +603,36 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(info)
 }
 
+// handleEcho 请求回显接口：返回请求的 method/path/query/headers/body
+// 配合 curl 模式使用：port-test -curl http://localhost:8080/echo?a=1 -X POST -d '{"k":1}'
+func handleEcho(w http.ResponseWriter, r *http.Request) {
+	// 读取请求体
+	body, _ := io.ReadAll(r.Body)
+	defer r.Body.Close()
+
+	// 收集请求头
+	headers := make(map[string]string, len(r.Header))
+	for k, v := range r.Header {
+		headers[k] = strings.Join(v, ", ")
+	}
+
+	echo := map[string]interface{}{
+		"method":   r.Method,
+		"path":     r.URL.Path,
+		"query":    r.URL.RawQuery,
+		"proto":    r.Proto,
+		"remote":   r.RemoteAddr,
+		"headers":  headers,
+		"body":     string(body),
+		"body_len": len(body),
+		"time":     time.Now().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(getStatusCode())
+	json.NewEncoder(w).Encode(echo)
+}
+
 // getResponseType 获取响应类型描述
 func getResponseType() string {
 	if htmlContent != nil {
@@ -561,7 +671,13 @@ type flagOpts struct {
 	insecure                 *bool
 	code                     *int
 	usePort, useTcping       *bool
-	useCurl                  *bool
+	useCurl, useScan         *bool
+	useBench, useUdp         *bool
+	useDns, useTraceroute    *bool
+	benchTotal, benchConc    *int
+	dnsType                  *string
+	trTcp                    *bool
+	trMaxHops, trWait        *int
 }
 
 // extractTrailingFlags 从位置参数中回收后置的 flag
@@ -569,8 +685,6 @@ type flagOpts struct {
 // "port-test -curl https://x -k -timeout 10" 中 URL 后面的
 // -k / -timeout 会残留在位置参数中。此函数把它们提取出来
 // 应用到对应 flag 变量，并返回剩余的真实位置参数。
-// 支持的值 flag: -timeout -count -interval -ip -p -X -d -H -code
-// 支持的布尔 flag: -k -port -tcping -curl
 func extractTrailingFlags(args []string, opts *flagOpts) []string {
 	valueFlags := map[string]func(string){
 		"-timeout":  func(v string) { if opts.timeout != nil { *opts.timeout = atoiSafe(v, *opts.timeout) } },
@@ -582,6 +696,11 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		"-d":        func(v string) { if opts.data != nil { *opts.data = v } },
 		"-H":        func(v string) { if opts.headers != nil { *opts.headers = append(*opts.headers, v) } },
 		"-code":     func(v string) { if opts.code != nil { *opts.code = atoiSafe(v, *opts.code) } },
+		"-n":        func(v string) { if opts.benchTotal != nil { *opts.benchTotal = atoiSafe(v, *opts.benchTotal) } },
+		"-c":        func(v string) { if opts.benchConc != nil { *opts.benchConc = atoiSafe(v, *opts.benchConc) } },
+		"-type":     func(v string) { if opts.dnsType != nil { *opts.dnsType = v } },
+		"-m":        func(v string) { if opts.trMaxHops != nil { *opts.trMaxHops = atoiSafe(v, *opts.trMaxHops) } },
+		"-w":        func(v string) { if opts.trWait != nil { *opts.trWait = atoiSafe(v, *opts.trWait) } },
 	}
 
 	rest := make([]string, 0, len(args))
@@ -606,6 +725,30 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		case "-curl":
 			if opts.useCurl != nil {
 				*opts.useCurl = true
+			}
+		case "-scan":
+			if opts.useScan != nil {
+				*opts.useScan = true
+			}
+		case "-bench":
+			if opts.useBench != nil {
+				*opts.useBench = true
+			}
+		case "-udp":
+			if opts.useUdp != nil {
+				*opts.useUdp = true
+			}
+		case "-dns":
+			if opts.useDns != nil {
+				*opts.useDns = true
+			}
+		case "-traceroute":
+			if opts.useTraceroute != nil {
+				*opts.useTraceroute = true
+			}
+		case "-T":
+			if opts.trTcp != nil {
+				*opts.trTcp = true
 			}
 		default:
 			boolHandled = false
