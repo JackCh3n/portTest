@@ -6,7 +6,7 @@ build:
 
 # 运行
 run:
-	go run . -p 8080
+	go run . -port 8080
 
 # 测试
 test:
@@ -43,4 +43,8 @@ local:
 
 # TCPing 模式测试
 tcping-test:
-	go run . -mode tcping -ip 127.0.0.1 -p 80,443,3306
+	go run . -tcping -ip 127.0.0.1 -p 80,443,3306
+
+# CURL 模式测试
+curl-test:
+	go run . -curl https://www.baidu.com -k

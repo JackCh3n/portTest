@@ -47,38 +47,53 @@ func printUsage() {
 	printHeader()
 	fmt.Println()
 	fmt.Println("  用法:")
-	fmt.Println("    port-test [选项] [位置参数]")
+	fmt.Println("    port-test -port [端口...]    启动 HTTP 测试服务")
+	fmt.Println("    port-test -tcping <目标...>  TCP 端口连通性测试")
+	fmt.Println("    port-test -curl <URL>        模拟 curl 抓取网页内容")
 	fmt.Println()
-	fmt.Println("  模式:")
-	fmt.Println("    port      启动 HTTP 测试服务 (默认)")
-	fmt.Println("    tcping    TCP 端口连通性测试")
+	fmt.Println("  模式说明:")
+	fmt.Println("    -port     启动 HTTP 测试服务 (占用指定端口并返回 JSON/HTML/状态码)")
+	fmt.Println("    -tcping   TCP 端口连通性测试")
+	fmt.Println("    -curl     模拟 curl 发送 HTTP/HTTPS 请求并输出响应")
 	fmt.Println()
-	fmt.Println("  Port 模式 (默认):")
-	fmt.Println("    port-test                          默认启动 8080 端口")
-	fmt.Println("    port-test -mode port 8080           指定端口")
-	fmt.Println("    port-test -mode port 8080 9090      多个端口")
-	fmt.Println("    port-test -p 8080,9090              用 -p 指定多个端口")
-	fmt.Println("    port-test -p 8080 -code 403         指定状态码")
-	fmt.Println("    port-test -p 8080 -html index.html  指定 HTML 文件")
+	fmt.Println("  Port 模式:")
+	fmt.Println("    port-test -port 8080                          指定端口")
+	fmt.Println("    port-test -port 8080 9090                     多个端口")
+	fmt.Println("    port-test -p 8080,9090                        用 -p 指定多个端口")
+	fmt.Println("    port-test -p 8080 -code 403                   指定状态码")
+	fmt.Println("    port-test -p 8080 -html index.html            指定 HTML 文件")
 	fmt.Println("    port-test -p 8080 -json '{\"code\":200,\"msg\":\"ok\"}'")
 	fmt.Println()
 	fmt.Println("  TCPing 模式:")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080               单主机单端口")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080,443           单主机多端口(逗号)")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080 443 8088      单主机多端口(空格)")
-	fmt.Println("    port-test -mode tcping 10.0.0.1:8080#10.0.0.2:443  多主机用#分隔")
-	fmt.Println("    port-test -mode tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
-	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 80,443     传统写法")
-	fmt.Println("    port-test -mode tcping -ip 10.0.0.1 -p 1-1024     端口范围")
+	fmt.Println("    port-test -tcping 10.0.0.1:8080               单主机单端口")
+	fmt.Println("    port-test -tcping 10.0.0.1:8080,443           单主机多端口(逗号)")
+	fmt.Println("    port-test -tcping 10.0.0.1:8080 443 8088      单主机多端口(空格)")
+	fmt.Println("    port-test -tcping 10.0.0.1:8080#10.0.0.2:443  多主机用#分隔")
+	fmt.Println("    port-test -tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
+	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 80,443      传统写法")
+	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 1-1024      端口范围")
 	fmt.Println("    端口分隔符: , 、 -")
 	fmt.Println("    多主机分隔符: ! # = + \\ / ? (均无需引号)")
 	fmt.Println()
+	fmt.Println("  CURL 模式:")
+	fmt.Println("    port-test -curl https://example.com                    GET 抓取")
+	fmt.Println("    port-test -curl https://example.com -k                 忽略 HTTPS 证书")
+	fmt.Println("    port-test -curl https://api.com/login -X POST -d 'a=1&b=2'  POST 请求")
+	fmt.Println("    port-test -curl http://api.com/json -X POST -d '{\"k\":1}' -H 'Content-Type: application/json'")
+	fmt.Println("    port-test -curl http://api.com -H 'Authorization: Bearer xxx' -H 'X-Custom: 1'")
+	fmt.Println()
 	fmt.Println("  全局选项:")
-	fmt.Println("    -mode <mode>     运行模式: port (默认) / tcping")
-	fmt.Println("    -timeout <sec>   连接超时时间 (tcping, 默认: 3)")
-	fmt.Println("    -count <num>     测试次数 (tcping, 默认: 1)")
-	fmt.Println("    -interval <sec>  重试间隔秒 (tcping, 默认: 1)")
-	fmt.Println("    -version         显示版本信息")
+	fmt.Println("    -port <ports...>   启动 HTTP 测试服务")
+	fmt.Println("    -tcping <targets>  TCP 端口连通性测试")
+	fmt.Println("    -curl <url>        模拟 curl 请求")
+	fmt.Println("    -timeout <sec>     连接超时时间 (tcping/curl, 默认: 3)")
+	fmt.Println("    -count <num>       测试次数 (tcping, 默认: 1)")
+	fmt.Println("    -interval <sec>    重试间隔秒 (tcping, 默认: 1)")
+	fmt.Println("    -X <method>        HTTP 方法 (curl, 默认: GET)")
+	fmt.Println("    -d <data>          请求体 (curl, POST 时自动加 Content-Type)")
+	fmt.Println("    -H <header>        HTTP 请求头, 可多次指定 (curl)")
+	fmt.Println("    -k                 忽略 HTTPS 证书校验 (curl)")
+	fmt.Println("    -version           显示版本信息")
 	fmt.Println()
 }
 
@@ -90,12 +105,24 @@ func main() {
 	htmlPath := flag.String("html", "", "HTML 文件路径")
 	staticDir := flag.String("dir", "", "静态文件目录")
 
-	// 模式参数
-	mode := flag.String("mode", "port", "运行模式: port (默认) / tcping")
+	// 模式开关（替代原 -mode 参数）
+	usePort := flag.Bool("port", false, "Port 模式: 启动 HTTP 测试服务")
+	useTcping := flag.Bool("tcping", false, "TCPing 模式: TCP 端口连通性测试")
+	useCurl := flag.Bool("curl", false, "CURL 模式: 模拟 curl 抓取内容")
+
+	// TCPing 参数
 	target := flag.String("ip", "", "目标IP地址 (tcping 模式)")
-	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping 模式)")
+	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping/curl 模式)")
 	count := flag.Int("count", 1, "测试次数 (tcping 模式)")
 	interval := flag.Int("interval", 1, "重试间隔(秒, tcping 模式)")
+
+	// CURL 参数
+	method := flag.String("X", "", "HTTP 方法 (curl 模式, 默认 GET)")
+	data := flag.String("d", "", "请求体 (curl 模式)")
+	var headers headerList
+	flag.Var(&headers, "H", "HTTP 请求头, 可多次指定 (curl 模式)")
+	insecure := flag.Bool("k", false, "忽略 HTTPS 证书校验 (curl 模式)")
+
 	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
 
@@ -105,42 +132,81 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 无参数时显示帮助
-	if len(os.Args) == 1 {
-		printUsage()
-		os.Exit(0)
-	}
-
 	// 获取位置参数（flag 解析后剩余的非 flag 参数）
 	posArgs := flag.Args()
 
+	// 回收位置参数中后置的 flag（兼容 "port-test -curl URL -k -X POST" 这类 curl 习惯写法）
+	// Go flag 包在遇到第一个非 flag 参数后停止解析，URL 后面的 flag 会残留在位置参数中
+	posArgs = extractTrailingFlags(posArgs,
+		&flagOpts{
+			timeout:   timeout,
+			count:     count,
+			interval:  interval,
+			ip:        target,
+			portStr:   portStr,
+			method:    method,
+			data:      data,
+			headers:   &headers,
+			insecure:  insecure,
+			code:      code,
+			usePort:   usePort,
+			useTcping: useTcping,
+			useCurl:   useCurl,
+		})
+
+	// 无任何模式开关且无位置参数时显示帮助
+	// 兼容旧用法: 只带 -p/-code 等参数时默认走 port 模式
+	if !*usePort && !*useTcping && !*useCurl {
+		if len(posArgs) == 0 && *portStr == "" && *target == "" {
+			printUsage()
+			os.Exit(0)
+		}
+		// 旧用法默认 port 模式
+		*usePort = true
+	}
+
+	// 同时指定多个模式时报错
+	modes := 0
+	if *usePort {
+		modes++
+	}
+	if *useTcping {
+		modes++
+	}
+	if *useCurl {
+		modes++
+	}
+	if modes > 1 {
+		fmt.Println("  错误: 只能指定一种模式 (-port / -tcping / -curl 互斥)")
+		os.Exit(1)
+	}
+
 	// 根据模式运行
-	switch *mode {
-	case "tcping":
+	switch {
+	case *useCurl:
+		printHeader()
+		runCurlMode(posArgs, *method, *data, headers, *insecure, *timeout)
+
+	case *useTcping:
 		printHeader()
 		runTcpingMode(posArgs, *target, *portStr, *timeout, *count, *interval)
 
-	case "port":
+	default: // *usePort
 		printHeader()
 		runPortMode(posArgs, *portStr, *code, *jsonStr, *htmlPath, *staticDir)
-
-	default:
-		fmt.Printf("未知模式: %s\n", *mode)
-		fmt.Println("可用模式: port (默认), tcping")
-		os.Exit(1)
 	}
 }
 
 // runTcpingMode 解析位置参数并启动 tcping
 // 支持的多主机分隔符: ! # = + \ / ?
 // 支持的写法:
-//   port-test -mode tcping 10.0.0.1:8080                    单主机单端口
-//   port-test -mode tcping 10.0.0.1:8080,443               单主机多端口(逗号)
-//   port-test -mode tcping 10.0.0.1:8080 443 8088          单主机多端口(空格)
-//   port-test -mode tcping 10.0.0.1 8080 443               host和端口分开
-//   port-test -mode tcping 10.0.0.1:8080#10.0.0.2:443      多主机用#分隔
-//   port-test -mode tcping 10.0.0.1:8080,443#10.0.0.2:9999 多主机多端口
-//   port-test -mode tcping -ip 10.0.0.1 -p 80,443           传统写法
+//   port-test -tcping 10.0.0.1:8080                    单主机单端口
+//   port-test -tcping 10.0.0.1:8080,443               单主机多端口(逗号)
+//   port-test -tcping 10.0.0.1:8080 443 8088          单主机多端口(空格)
+//   port-test -tcping 10.0.0.1 8080 443               host和端口分开
+//   port-test -tcping 10.0.0.1:8080#10.0.0.2:443      多主机用#分隔
+//   port-test -tcping 10.0.0.1:8080,443#10.0.0.2:9999 多主机多端口
+//   port-test -tcping -ip 10.0.0.1 -p 80,443           传统写法
 func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int) {
 	var targets []HostTarget
 
@@ -174,8 +240,8 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 	// 校验
 	if len(targets) == 0 {
 		fmt.Println("  错误: 请指定目标地址")
-		fmt.Println("  用法: port-test -mode tcping <host:port> [port2 ...] [# host2:port ...]")
-		fmt.Println("  或:   port-test -mode tcping -ip <host> -p <ports>")
+		fmt.Println("  用法: port-test -tcping <host:port> [port2 ...] [# host2:port ...]")
+		fmt.Println("  或:   port-test -tcping -ip <host> -p <ports>")
 		os.Exit(1)
 	}
 	for i := range targets {
@@ -252,8 +318,8 @@ func parseHostSegment(seg string) HostTarget {
 
 // runPortMode 解析位置参数并启动 port 模式
 // 支持的写法:
-//   port-test -mode port 8080
-//   port-test -mode port 8080 9090 3000
+//   port-test -port 8080
+//   port-test -port 8080 9090 3000
 //   port-test -p 8080,9090 (传统写法)
 func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath, staticDir string) {
 	var ports []int
@@ -484,4 +550,92 @@ func splitMultiHost(s string) []string {
 		return strings.Fields(s)
 	}
 	return []string{s}
+}
+
+// flagOpts 后置 flag 回收目标（指针指向 main 中的 flag 变量）
+type flagOpts struct {
+	timeout, count, interval *int
+	ip, portStr              *string
+	method, data             *string
+	headers                  *headerList
+	insecure                 *bool
+	code                     *int
+	usePort, useTcping       *bool
+	useCurl                  *bool
+}
+
+// extractTrailingFlags 从位置参数中回收后置的 flag
+// Go flag 包在遇到第一个非 flag 参数时停止解析，因此
+// "port-test -curl https://x -k -timeout 10" 中 URL 后面的
+// -k / -timeout 会残留在位置参数中。此函数把它们提取出来
+// 应用到对应 flag 变量，并返回剩余的真实位置参数。
+// 支持的值 flag: -timeout -count -interval -ip -p -X -d -H -code
+// 支持的布尔 flag: -k -port -tcping -curl
+func extractTrailingFlags(args []string, opts *flagOpts) []string {
+	valueFlags := map[string]func(string){
+		"-timeout":  func(v string) { if opts.timeout != nil { *opts.timeout = atoiSafe(v, *opts.timeout) } },
+		"-count":    func(v string) { if opts.count != nil { *opts.count = atoiSafe(v, *opts.count) } },
+		"-interval": func(v string) { if opts.interval != nil { *opts.interval = atoiSafe(v, *opts.interval) } },
+		"-ip":       func(v string) { if opts.ip != nil { *opts.ip = v } },
+		"-p":        func(v string) { if opts.portStr != nil { *opts.portStr = v } },
+		"-X":        func(v string) { if opts.method != nil { *opts.method = v } },
+		"-d":        func(v string) { if opts.data != nil { *opts.data = v } },
+		"-H":        func(v string) { if opts.headers != nil { *opts.headers = append(*opts.headers, v) } },
+		"-code":     func(v string) { if opts.code != nil { *opts.code = atoiSafe(v, *opts.code) } },
+	}
+
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// 布尔 flag
+		boolHandled := true
+		switch arg {
+		case "-k":
+			if opts.insecure != nil {
+				*opts.insecure = true
+			}
+		case "-port":
+			if opts.usePort != nil {
+				*opts.usePort = true
+			}
+		case "-tcping":
+			if opts.useTcping != nil {
+				*opts.useTcping = true
+			}
+		case "-curl":
+			if opts.useCurl != nil {
+				*opts.useCurl = true
+			}
+		default:
+			boolHandled = false
+		}
+		if boolHandled {
+			continue
+		}
+
+		// 值 flag: 需要下一个参数作为值
+		if fn, ok := valueFlags[arg]; ok {
+			if i+1 < len(args) {
+				fn(args[i+1])
+				i++
+			} else {
+				fmt.Printf("  警告: flag %s 缺少值, 已忽略\n", arg)
+			}
+			continue
+		}
+
+		// 普通位置参数
+		rest = append(rest, arg)
+	}
+	return rest
+}
+
+// atoiSafe 安全解析整数，失败时返回默认值
+func atoiSafe(s string, def int) int {
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	fmt.Printf("  警告: 无效数值 %q, 使用默认值 %d\n", s, def)
+	return def
 }
