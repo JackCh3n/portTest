@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"syscall"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -132,26 +131,21 @@ func sendProbe(pc *ipv4.PacketConn, dst net.IP, ttl int, port int, timeout time.
 	}
 
 	// 通过 UDP socket 发送探测包（触发 ICMP Time Exceeded / Port Unreachable）
-	// 使用 net.Dialer.Control 在连接时设置 IP TTL
-	dialer := &net.Dialer{
-		Timeout: timeout,
-		Control: func(network, address string, c syscall.RawConn) error {
-			var setErr error
-			err := c.Control(func(fd uintptr) {
-				setErr = syscall.SetsockoptInt(syscall.Handle(fd), syscall.IPPROTO_IP, syscall.IP_TTL, ttl)
-			})
-			if err != nil {
-				return err
-			}
-			return setErr
-		},
-	}
-
-	conn, err := dialer.Dial("udp", net.JoinHostPort(dst.String(), strconv.Itoa(probePort)))
+	conn, err := net.DialTimeout("udp", net.JoinHostPort(dst.String(), strconv.Itoa(probePort)), timeout)
 	if err != nil {
 		return "", false, time.Since(start)
 	}
 	defer conn.Close()
+
+	// 使用 x/net/ipv4 的跨平台封装设置 IP TTL（避免 syscall.Handle 等平台差异）
+	udpConn, ok := conn.(*net.UDPConn)
+	if ok {
+		ipv4Conn := ipv4.NewConn(udpConn)
+		if err := ipv4Conn.SetTTL(ttl); err != nil {
+			// TTL 设置失败不致命，继续发送
+			_ = err
+		}
+	}
 
 	// 发送探测数据
 	probe := make([]byte, 40)
