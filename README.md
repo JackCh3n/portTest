@@ -6,7 +6,7 @@
 
 - 🛡️ **Port 模式**：启动 HTTP 服务器占用端口，返回自定义 JSON/HTML/状态码，内置 `/echo` 回显接口
 - 🗡️ **TCPing 模式**：主动 TCP 连接测试，验证网络是否畅通
-- 🌐 **CURL 模式**：模拟 curl 发送 HTTP/HTTPS 请求，支持 GET/POST、自定义头、忽略证书
+- 🌐 **CURL 模式**：模拟 curl 发送 HTTP/HTTPS 请求，支持 GET/POST、自定义头、忽略证书、跟随重定向
 - 🔍 **SCAN 模式**：快速端口扫描（常见端口/自定义范围/全端口）
 - ⚡ **BENCH 模式**：轻量 HTTP 压测，输出 QPS/延迟分布（P50/P90/P99）
 - 📦 **UDP 模式**：UDP 连通性测试
@@ -92,6 +92,9 @@ port-test -curl https://example.com
 # 忽略 HTTPS 证书校验（自签名证书场景）
 port-test -curl https://self-signed.example.com -k
 
+# 跟随重定向（如 302/301）
+port-test -curl https://example.com -L
+
 # POST 表单请求
 port-test -curl https://api.example.com/login -X POST -d 'username=admin&password=123'
 
@@ -138,9 +141,17 @@ port-test -bench http://api.com/login -X POST -d 'username=admin&password=123'
 
 # 忽略证书
 port-test -bench https://self-signed.com -k -timeout 10
+
+# 复用连接 (keep-alive) 压测，模拟长连接场景
+port-test -bench https://example.com -n 1000 -c 50 -ka
+
+# 跟随重定向压测
+port-test -bench https://example.com -n 100 -c 10 -L
 ```
 
 输出：总请求 / 成功 / 失败 / 耗时 / QPS / 平均延迟 / P50 / P90 / P99。
+
+> 默认短连接（每次请求断开，更贴近真实场景）；加 `-ka` 复用连接性能更高。
 
 ### UDP 模式
 
@@ -165,6 +176,9 @@ port-test -dns example.com -type A
 
 # 指定 DNS 服务器
 port-test -dns example.com -ip 8.8.8.8
+
+# 指定 DNS 服务器（自定义端口）
+port-test -dns example.com -ip 8.8.8.8:5353
 ```
 
 ### TRACEROUTE 模式（路由追踪）
@@ -258,8 +272,10 @@ port-test -traceroute example.com -m 20 -w 2
 | `-d` | - | 请求体，指定后自动使用 POST |
 | `-H` | - | 请求头，可多次指定（`-H 'Key: Value'`） |
 | `-k` | `false` | 忽略 HTTPS 证书校验 |
+| `-L` | `false` | 跟随重定向（默认不跟随并提示 Location） |
 | `-n` | `100` | 总请求数（仅 bench） |
 | `-c` | `10` | 并发数（仅 bench） |
+| `-ka` | `false` | 复用连接 keep-alive（仅 bench，默认短连接） |
 
 ### SCAN 模式
 
@@ -272,7 +288,7 @@ port-test -traceroute example.com -m 20 -w 2
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `-type` | 全部 | 记录类型：A/AAAA/MX/CNAME/TXT/NS |
-| `-ip` | 系统默认 | DNS 服务器地址 |
+| `-ip` | 系统默认 | DNS 服务器地址（支持 `8.8.8.8:5353` 自定义端口） |
 
 ### TRACEROUTE 模式
 
@@ -336,7 +352,7 @@ go test -v ./...
 
 ## GitHub Actions
 
-提交代码自动触发构建，Release 标题/标签格式：`v年_月日_时分`
+提交代码自动触发构建，Release 标题/标签格式：`v年_月日`（如 `v2026_0807`）
 
 二进制产物命名（不带时间戳）：`port-test-<系统>-<架构>[.exe]`
 

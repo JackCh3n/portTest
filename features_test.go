@@ -265,3 +265,29 @@ func TestBenchQPSNoDivisionByZero(t *testing.T) {
 		t.Errorf("QPS with zero elapsed = %v, want 0.0 (no division by zero)", qps)
 	}
 }
+
+// TestDnsServerAddress 验证 DNS 自定义服务器地址构造（带/不带端口）
+func TestDnsServerAddress(t *testing.T) {
+	buildAddr := func(server string) string {
+		if _, _, err := net.SplitHostPort(server); err != nil {
+			return net.JoinHostPort(strings.Trim(server, "[]"), "53")
+		}
+		return server
+	}
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"8.8.8.8", "8.8.8.8:53"},
+		{"8.8.8.8:5353", "8.8.8.8:5353"},
+		{"[2001:4860:4860::8888]", "[2001:4860:4860::8888]:53"},
+		{"[2001:4860:4860::8888]:5353", "[2001:4860:4860::8888]:5353"},
+	}
+
+	for _, tt := range tests {
+		if got := buildAddr(tt.input); got != tt.expected {
+			t.Errorf("buildAddr(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}

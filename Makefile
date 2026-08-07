@@ -29,6 +29,8 @@ build-all:
 	GOOS=linux GOARCH=arm go build -o port-test-linux-arm .
 	GOOS=linux GOARCH=mips64 go build -o port-test-linux-mips64 .
 	GOOS=linux GOARCH=mips64le go build -o port-test-linux-mips64le .
+	GOOS=linux GOARCH=mips go build -o port-test-linux-mips .
+	GOOS=linux GOARCH=mipsle go build -o port-test-linux-mipsle .
 	GOOS=linux GOARCH=loong64 go build -o port-test-linux-loong64 .
 	# macOS
 	GOOS=darwin GOARCH=amd64 go build -o port-test-mac-amd64 .
@@ -36,6 +38,8 @@ build-all:
 	# FreeBSD
 	GOOS=freebsd GOARCH=amd64 go build -o port-test-freebsd-amd64 .
 	GOOS=freebsd GOARCH=arm64 go build -o port-test-freebsd-arm64 .
+	# OpenBSD
+	GOOS=openbsd GOARCH=amd64 go build -o port-test-openbsd-amd64 .
 
 # 默认本地构建（Windows x86）
 local:
@@ -68,3 +72,4 @@ dns-test:
 # TRACEROUTE 模式测试（需管理员/root）
 traceroute-test:
 	go run . -traceroute 8.8.8.8 -m 5 -w 1
+	go run . -traceroute example.com -T -p 443 -m 5 -w 1

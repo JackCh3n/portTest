@@ -24,10 +24,11 @@ func (h *headerList) Set(val string) error {
 // 支持的写法:
 //   port-test -curl https://example.com                           GET 抓取
 //   port-test -curl https://example.com -k                        忽略 HTTPS 证书
+//   port-test -curl https://example.com -L                        跟随重定向
 //   port-test -curl https://api.com/login -X POST -d 'a=1&b=2'    POST 请求
 //   port-test -curl http://api.com/json -X POST -d '{"k":1}' -H 'Content-Type: application/json'
 //   port-test -curl http://api.com -H 'Authorization: Bearer xxx' 自定义请求头
-func runCurlMode(posArgs []string, method, data string, headers headerList, insecure bool, timeoutSec int) {
+func runCurlMode(posArgs []string, method, data string, headers headerList, insecure, followRedirect bool, timeoutSec int) {
 	// 校验 URL
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定目标 URL")
@@ -93,6 +94,9 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	if insecure {
 		fmt.Print(" | 已忽略 HTTPS 证书校验")
 	}
+	if followRedirect {
+		fmt.Print(" | 跟随重定向")
+	}
 	fmt.Println()
 	if data != "" {
 		fmt.Printf("  数据: %s\n", data)
@@ -102,7 +106,7 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	}
 	fmt.Println("  ------------------------------------")
 
-	// HTTP 客户端：支持忽略 HTTPS 证书
+	// HTTP 客户端：支持忽略 HTTPS 证书、跟随重定向
 	transport := &http.Transport{}
 	if insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
@@ -110,6 +114,20 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	client := &http.Client{
 		Timeout:   time.Duration(timeoutSec) * time.Second,
 		Transport: transport,
+	}
+	if followRedirect {
+		// 限制最大 10 次重定向，避免重定向循环
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("重定向次数超过 10 次, 疑似重定向循环")
+			}
+			return nil
+		}
+	} else {
+		// 默认不跟随重定向（与 curl 不带 -L 行为一致），手动打印 Location 提示
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
 	}
 
 	startTime := time.Now()
@@ -132,6 +150,11 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 
 	// 输出响应状态
 	fmt.Printf("  状态: %d %s (耗时 %v)\n", resp.StatusCode, http.StatusText(resp.StatusCode), elapsed.Round(time.Millisecond))
+	if !followRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			fmt.Printf("  提示: 收到重定向 -> %s (加 -L 可自动跟随)\n", loc)
+		}
+	}
 	fmt.Println("  响应头:")
 	for k, v := range resp.Header {
 		fmt.Printf("    %s: %s\n", k, strings.Join(v, ", "))

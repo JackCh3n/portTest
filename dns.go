@@ -26,11 +26,16 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 	// 构造 Resolver（支持自定义 DNS 服务器）
 	resolver := &net.Resolver{}
 	if dnsServer != "" {
+		// 支持带端口写法 (8.8.8.8:5353 / [::1]:5353)，不带端口时默认 53
+		dnsAddr := dnsServer
+		if _, _, err := net.SplitHostPort(dnsServer); err != nil {
+			dnsAddr = net.JoinHostPort(strings.Trim(dnsServer, "[]"), "53")
+		}
 		resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 				d := net.Dialer{Timeout: 5 * time.Second}
-				return d.DialContext(ctx, "udp", dnsServer+":53")
+				return d.DialContext(ctx, "udp", dnsAddr)
 			},
 		}
 	}

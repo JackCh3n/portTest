@@ -92,7 +92,13 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 			if tcpMode {
 				ip, done, rtt = sendTcpProbe(icmpPC, dst, ttl, port, timeout)
 			} else {
-				ip, done, rtt = sendProbe(icmpPC, dst, ttl, port, timeout)
+				// 经典 traceroute 行为: 每个 TTL 使用递增探测端口
+				// 便于区分 ICMP 响应来源（UDP 模式默认起始 33434）
+				probePort := port + (ttl-1)*3 + attempt
+				if probePort > 65535 {
+					probePort = 33434 + (probePort % 32000)
+				}
+				ip, done, rtt = sendProbe(icmpPC, dst, ttl, probePort, timeout)
 			}
 
 			times = append(times, rtt)

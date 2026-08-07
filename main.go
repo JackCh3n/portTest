@@ -81,6 +81,7 @@ func printUsage() {
 	fmt.Println("  CURL 模式:")
 	fmt.Println("    port-test -curl https://example.com                    GET 抓取")
 	fmt.Println("    port-test -curl https://example.com -k                 忽略 HTTPS 证书")
+	fmt.Println("    port-test -curl https://example.com -L                 跟随重定向")
 	fmt.Println("    port-test -curl https://api.com/login -X POST -d 'a=1&b=2'  POST 请求")
 	fmt.Println("    port-test -curl http://api.com/json -X POST -d '{\"k\":1}' -H 'Content-Type: application/json'")
 	fmt.Println("    port-test -curl http://api.com -H 'Authorization: Bearer xxx' -H 'X-Custom: 1'")
@@ -117,8 +118,10 @@ func printUsage() {
 	fmt.Println("    -d <data>         请求体 (curl/bench, POST 时自动加 Content-Type)")
 	fmt.Println("    -H <header>       HTTP 请求头, 可多次指定 (curl/bench)")
 	fmt.Println("    -k                忽略 HTTPS 证书校验 (curl/bench)")
+	fmt.Println("    -L                跟随重定向 (curl/bench)")
 	fmt.Println("    -n <num>          总请求数 (bench, 默认: 100)")
 	fmt.Println("    -c <num>          并发数 (bench, 默认: 10)")
+	fmt.Println("    -ka               复用连接 keep-alive (bench, 默认短连接)")
 	fmt.Println("    -type <type>      DNS 记录类型 (dns, 默认: 全部)")
 	fmt.Println("    -ip <host>        目标地址 (tcping) 或 DNS 服务器 (dns)")
 	fmt.Println("    -T                TCP 模式 (traceroute)")
@@ -158,10 +161,12 @@ func main() {
 	var headers headerList
 	flag.Var(&headers, "H", "HTTP 请求头, 可多次指定 (curl/bench 模式)")
 	insecure := flag.Bool("k", false, "忽略 HTTPS 证书校验 (curl/bench 模式)")
+	followRedirect := flag.Bool("L", false, "跟随重定向 (curl/bench 模式)")
 
 	// BENCH 参数
 	benchTotal := flag.Int("n", 100, "总请求数 (bench 模式, 默认: 100)")
 	benchConcurrency := flag.Int("c", 10, "并发数 (bench 模式, 默认: 10)")
+	benchKeepAlive := flag.Bool("ka", false, "复用连接 keep-alive (bench 模式, 默认关闭)")
 
 	// DNS 参数
 	dnsType := flag.String("type", "", "DNS 记录类型 (dns 模式, 默认: 全部)")
@@ -190,6 +195,7 @@ func main() {
 			data:          data,
 			headers:       &headers,
 			insecure:      insecure,
+			followRedirect: followRedirect,
 			code:          code,
 			usePort:       usePort,
 			useTcping:     useTcping,
@@ -201,6 +207,7 @@ func main() {
 			useTraceroute: useTraceroute,
 			benchTotal:    benchTotal,
 			benchConc:     benchConcurrency,
+			benchKeepAlive: benchKeepAlive,
 			dnsType:       dnsType,
 			trTcp:         trTcp,
 			trMaxHops:     trMaxHops,
@@ -244,7 +251,7 @@ func main() {
 	switch {
 	case *useCurl:
 		printHeader()
-		runCurlMode(posArgs, *method, *data, headers, *insecure, *timeout)
+		runCurlMode(posArgs, *method, *data, headers, *insecure, *followRedirect, *timeout)
 
 	case *useTcping:
 		printHeader()
@@ -256,7 +263,7 @@ func main() {
 
 	case *useBench:
 		printHeader()
-		runBenchMode(posArgs, *method, *data, headers, *insecure, *timeout, *benchTotal, *benchConcurrency)
+		runBenchMode(posArgs, *method, *data, headers, *insecure, *followRedirect, *benchKeepAlive, *timeout, *benchTotal, *benchConcurrency)
 
 	case *useUdp:
 		printHeader()
@@ -680,12 +687,14 @@ type flagOpts struct {
 	method, data             *string
 	headers                  *headerList
 	insecure                 *bool
+	followRedirect           *bool
 	code                     *int
 	usePort, useTcping       *bool
 	useCurl, useScan         *bool
 	useBench, useUdp         *bool
 	useDns, useTraceroute    *bool
 	benchTotal, benchConc    *int
+	benchKeepAlive           *bool
 	dnsType                  *string
 	trTcp                    *bool
 	trMaxHops, trWait        *int
@@ -729,6 +738,14 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		case "-k":
 			if opts.insecure != nil {
 				*opts.insecure = true
+			}
+		case "-L":
+			if opts.followRedirect != nil {
+				*opts.followRedirect = true
+			}
+		case "-ka":
+			if opts.benchKeepAlive != nil {
+				*opts.benchKeepAlive = true
 			}
 		case "-port":
 			if opts.usePort != nil {

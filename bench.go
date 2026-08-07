@@ -19,7 +19,9 @@ import (
 //   port-test -bench https://example.com -n 1000 -c 50   1000 请求, 50 并发
 //   port-test -bench http://api.com/login -X POST -d 'a=1'   POST 压测
 //   port-test -bench https://x.com -k -timeout 10        忽略证书 + 超时
-func runBenchMode(posArgs []string, method, data string, headers headerList, insecure bool, timeoutSec, total, concurrency int) {
+//   port-test -bench https://x.com -L                    跟随重定向
+//   port-test -bench https://x.com -ka                   复用连接 (keep-alive)
+func runBenchMode(posArgs []string, method, data string, headers headerList, insecure, followRedirect, keepAlive bool, timeoutSec, total, concurrency int) {
 	// 校验 URL
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定压测 URL")
@@ -84,14 +86,23 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 		return req
 	}
 
-	// HTTP 客户端（支持忽略证书）
+	// HTTP 客户端（支持忽略证书、跟随重定向、keep-alive 开关）
 	transport := &http.Transport{}
 	if insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
+	if !keepAlive {
+		// 关闭连接复用: 每次请求后断开, 模拟真实场景的短连接压测
+		transport.DisableKeepAlives = true
+	}
 	client := &http.Client{
 		Timeout:   time.Duration(timeoutSec) * time.Second,
 		Transport: transport,
+	}
+	if !followRedirect {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
 	}
 
 	// 打印压测信息
@@ -102,6 +113,14 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 	}
 	if insecure {
 		fmt.Print(" | 忽略证书")
+	}
+	if followRedirect {
+		fmt.Print(" | 跟随重定向")
+	}
+	if keepAlive {
+		fmt.Print(" | keep-alive")
+	} else {
+		fmt.Print(" | 短连接")
 	}
 	fmt.Println()
 	fmt.Println("  ------------------------------------")
