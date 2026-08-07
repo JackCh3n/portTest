@@ -120,8 +120,9 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	}
 	defer resp.Body.Close()
 
-	// 读取响应体
-	respBody, err := io.ReadAll(resp.Body)
+	// 读取响应体（限制 10MB，防止超大响应耗尽内存）
+	limitedBody := io.LimitReader(resp.Body, 10*1024*1024)
+	respBody, err := io.ReadAll(limitedBody)
 	if err != nil {
 		fmt.Printf("  读取响应失败: %v\n", err)
 		os.Exit(1)

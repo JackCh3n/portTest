@@ -23,9 +23,10 @@ type Config struct {
 }
 
 var (
-	config      Config
-	htmlContent []byte
-	jsonContent []byte
+	config         Config
+	htmlContent    []byte
+	jsonContent    []byte
+	staticDirValid bool // 静态目录是否有效（在 runPortMode 中一次性校验，避免多端口重复打印）
 )
 
 // JSONResponse 默认 JSON 响应
@@ -173,12 +174,6 @@ func main() {
 	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
 
-	// 显示版本
-	if *showVersion {
-		printHeader()
-		os.Exit(0)
-	}
-
 	// 获取位置参数（flag 解析后剩余的非 flag 参数）
 	posArgs := flag.Args()
 
@@ -210,7 +205,17 @@ func main() {
 			trTcp:         trTcp,
 			trMaxHops:     trMaxHops,
 			trWait:        trWait,
+			showVersion:   showVersion,
+			html:          htmlPath,
+			jsonStr:       jsonStr,
+			staticDir:     staticDir,
 		})
+
+	// 显示版本（可能在 flag.Parse 或 extractTrailingFlags 中被设置）
+	if *showVersion {
+		printHeader()
+		os.Exit(0)
+	}
 
 	// 无任何模式开关且无位置参数时显示帮助
 	// 兼容旧用法: 只带 -p/-code 等参数时默认走 port 模式
@@ -460,6 +465,16 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		fmt.Printf("  已加载 HTML 文件: %s\n", config.HTML)
 	}
 
+	// 校验静态目录（一次性，避免多端口重复打印）
+	if config.StaticDir != "" {
+		if info, err := os.Stat(config.StaticDir); err == nil && info.IsDir() {
+			staticDirValid = true
+			fmt.Printf("  静态文件目录: %s\n", config.StaticDir)
+		} else {
+			fmt.Printf("  警告: 静态目录不存在或不是目录: %s\n", config.StaticDir)
+		}
+	}
+
 	// 准备 JSON 响应
 	if config.JSON != "" {
 		jsonContent = []byte(config.JSON)
@@ -533,13 +548,8 @@ func startServer(port int) error {
 	mux.HandleFunc("/info", handleInfo)
 	mux.HandleFunc("/echo", handleEcho)
 
-	if config.StaticDir != "" {
-		if info, err := os.Stat(config.StaticDir); err == nil && info.IsDir() {
-			mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(config.StaticDir))))
-			fmt.Printf("  静态文件目录: %s\n", config.StaticDir)
-		} else {
-			fmt.Printf("  警告: 静态目录不存在或不是目录: %s\n", config.StaticDir)
-		}
+	if config.StaticDir != "" && staticDirValid {
+		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(config.StaticDir))))
 	}
 
 	addr := fmt.Sprintf(":%d", port)
@@ -606,8 +616,9 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 // handleEcho 请求回显接口：返回请求的 method/path/query/headers/body
 // 配合 curl 模式使用：port-test -curl http://localhost:8080/echo?a=1 -X POST -d '{"k":1}'
 func handleEcho(w http.ResponseWriter, r *http.Request) {
-	// 读取请求体
-	body, _ := io.ReadAll(r.Body)
+	// 读取请求体（限制 1MB，防止超大请求体耗尽内存）
+	limitedBody := io.LimitReader(r.Body, 1*1024*1024)
+	body, _ := io.ReadAll(limitedBody)
 	defer r.Body.Close()
 
 	// 收集请求头
@@ -678,6 +689,8 @@ type flagOpts struct {
 	dnsType                  *string
 	trTcp                    *bool
 	trMaxHops, trWait        *int
+	showVersion              *bool
+	html, jsonStr, staticDir *string
 }
 
 // extractTrailingFlags 从位置参数中回收后置的 flag
@@ -701,6 +714,9 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		"-type":     func(v string) { if opts.dnsType != nil { *opts.dnsType = v } },
 		"-m":        func(v string) { if opts.trMaxHops != nil { *opts.trMaxHops = atoiSafe(v, *opts.trMaxHops) } },
 		"-w":        func(v string) { if opts.trWait != nil { *opts.trWait = atoiSafe(v, *opts.trWait) } },
+		"-html":     func(v string) { if opts.html != nil { *opts.html = v } },
+		"-json":     func(v string) { if opts.jsonStr != nil { *opts.jsonStr = v } },
+		"-dir":      func(v string) { if opts.staticDir != nil { *opts.staticDir = v } },
 	}
 
 	rest := make([]string, 0, len(args))
@@ -749,6 +765,10 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		case "-T":
 			if opts.trTcp != nil {
 				*opts.trTcp = true
+			}
+		case "-version":
+			if opts.showVersion != nil {
+				*opts.showVersion = true
 			}
 		default:
 			boolHandled = false

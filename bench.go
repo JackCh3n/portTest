@@ -176,7 +176,10 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 		return latencies[idx]
 	}
 
-	qps := float64(successN) / elapsed.Seconds()
+	qps := 0.0
+	if elapsedSec := elapsed.Seconds(); elapsedSec > 0 {
+		qps = float64(successN) / elapsedSec
+	}
 
 	fmt.Println("  压测结果:")
 	fmt.Printf("    总请求: %d\n", total)

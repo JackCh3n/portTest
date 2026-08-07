@@ -1,11 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
 	"strconv"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -84,7 +85,16 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 		)
 
 		for attempt := 0; attempt < 3; attempt++ {
-			ip, done, rtt := sendProbe(icmpPC, dst, ttl, port, timeout)
+			var ip string
+			var done bool
+			var rtt time.Duration
+
+			if tcpMode {
+				ip, done, rtt = sendTcpProbe(icmpPC, dst, ttl, port, timeout)
+			} else {
+				ip, done, rtt = sendProbe(icmpPC, dst, ttl, port, timeout)
+			}
+
 			times = append(times, rtt)
 			if ip != "" {
 				hopIP = ip
@@ -119,25 +129,19 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	fmt.Printf("  总耗时: %v\n", time.Since(startTime).Round(time.Millisecond))
 }
 
-// sendProbe 发送一个 TTL 探测包并等待 ICMP 响应
+// sendProbe 发送一个 UDP TTL 探测包并等待 ICMP 响应
 // 返回: 响应来源 IP, 是否到达目标, 往返时间
 func sendProbe(pc *ipv4.PacketConn, dst net.IP, ttl int, port int, timeout time.Duration) (string, bool, time.Duration) {
 	start := time.Now()
 
-	// UDP 探测端口：经典 traceroute 用递增端口，TCP 模式固定目标端口
-	probePort := port
-	if probePort < 33434 {
-		probePort += rand.Intn(100)
-	}
-
 	// 通过 UDP socket 发送探测包（触发 ICMP Time Exceeded / Port Unreachable）
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(dst.String(), strconv.Itoa(probePort)), timeout)
+	conn, err := net.DialTimeout("udp", net.JoinHostPort(dst.String(), strconv.Itoa(port)), timeout)
 	if err != nil {
 		return "", false, time.Since(start)
 	}
 	defer conn.Close()
 
-	// 使用 x/net/ipv4 的跨平台封装设置 IP TTL（避免 syscall.Handle 等平台差异）
+	// 使用 x/net/ipv4 的跨平台封装设置 IP TTL
 	udpConn, ok := conn.(*net.UDPConn)
 	if ok {
 		ipv4Conn := ipv4.NewConn(udpConn)
@@ -181,12 +185,110 @@ func sendProbe(pc *ipv4.PacketConn, dst net.IP, ttl int, port int, timeout time.
 	}
 }
 
-// tcpProbe TCP 探测：TCP 模式下补充验证目标端口是否真实开放
-func tcpProbe(target string, port int, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(target, strconv.Itoa(port)), timeout)
-	if err != nil {
+// sendTcpProbe 发送一个 TCP SYN 探测包（带指定 TTL）并等待响应
+// TCP traceroute 原理: 通过 Dialer.Control 在 SYN 发出前设置 IP_TTL，
+// 中间路由器 TTL 过期时返回 ICMP Time Exceeded（由共享 ICMP 监听器捕获），
+// 目标收到 SYN 后返回 SYN-ACK（连接成功）或 RST（连接拒绝），均表示到达目标。
+// 返回: 响应来源 IP, 是否到达目标, 往返时间
+func sendTcpProbe(pc *ipv4.PacketConn, dst net.IP, ttl, port int, timeout time.Duration) (string, bool, time.Duration) {
+	start := time.Now()
+	deadline := start.Add(timeout)
+	addr := net.JoinHostPort(dst.String(), strconv.Itoa(port))
+
+	// TCP dialer: 在 Control 回调中设置 TTL（在 SYN 发出前生效）
+	dialer := &net.Dialer{
+		Timeout: timeout,
+		Control: func(network, address string, c syscall.RawConn) error {
+			// 尽力设置 TTL，失败不阻止连接（只是看不到中间跳）
+			var serr error
+			if err := c.Control(func(fd uintptr) {
+				serr = setSocketTTL(fd, ttl)
+			}); err != nil {
+				return err
+			}
+			_ = serr // 忽略 TTL 设置错误，继续 dial
+			return nil
+		},
+	}
+
+	// 异步发起 TCP 连接
+	tcpCh := make(chan error, 1)
+	go func() {
+		conn, err := dialer.Dial("tcp", addr)
+		if conn != nil {
+			conn.Close()
+		}
+		tcpCh <- err
+	}()
+
+	// ICMP 消息结构
+	type icmpMsg struct {
+		ip      string
+		msgType byte
+		ok      bool
+	}
+
+	// 可重启的 ICMP 读取器
+	readIcmp := func() <-chan icmpMsg {
+		ch := make(chan icmpMsg, 1)
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			ch <- icmpMsg{}
+			return ch
+		}
+		buf := make([]byte, 1500)
+		pc.SetReadDeadline(deadline)
+		go func() {
+			n, cm, _, err := pc.ReadFrom(buf)
+			if err != nil || n == 0 || cm == nil || cm.Src == nil {
+				ch <- icmpMsg{}
+				return
+			}
+			ch <- icmpMsg{cm.Src.String(), buf[0] & 0xff, true}
+		}()
+		return ch
+	}
+
+	icmpCh := readIcmp()
+
+	for {
+		select {
+		case msg := <-icmpCh:
+			if msg.ok {
+				switch msg.msgType {
+				case 11: // Time Exceeded — 中间路由器
+					return msg.ip, false, time.Since(start)
+				case 3: // Destination Unreachable — 到达目标（或不可达）
+					return msg.ip, true, time.Since(start)
+				}
+				// 无关 ICMP 包，重启读取器继续等待
+				icmpCh = readIcmp()
+			}
+			// ICMP 读取超时/出错，继续等待 TCP 结果
+
+		case err := <-tcpCh:
+			if err == nil {
+				// 连接成功 — 到达目标，端口开放
+				return dst.String(), true, time.Since(start)
+			}
+			if isConnectionRefused(err) {
+				// 连接被拒绝（RST）— 到达目标，端口关闭
+				return dst.String(), true, time.Since(start)
+			}
+			// 超时或其他错误 — 无法确认
+			return "", false, time.Since(start)
+
+		case <-time.After(time.Until(deadline)):
+			return "", false, time.Since(start)
+		}
+	}
+}
+
+// isConnectionRefused 判断错误是否为连接被拒绝（TCP RST）
+// 跨平台: Linux ECONNREFUSED=111, macOS=61, Windows WSAECONNREFUSED=1226
+func isConnectionRefused(err error) bool {
+	if err == nil {
 		return false
 	}
-	conn.Close()
-	return true
+	return errors.Is(err, syscall.ECONNREFUSED)
 }

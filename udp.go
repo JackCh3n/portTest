@@ -23,22 +23,16 @@ func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 		os.Exit(1)
 	}
 
-	// 解析目标
-	first := posArgs[0]
-	host := first
+	// 复用 parseHostSegment 统一解析逻辑（正确处理 IPv6/IPv4/hostname + 端口）
+	var host string
 	var ports []int
 
-	if strings.Contains(first, ":") && !strings.HasPrefix(first, "[") {
-		// host:port 或 host:port1,port2
-		idx := strings.LastIndex(first, ":")
-		host = first[:idx]
-		portStr := first[idx+1:]
-		ports = parsePortRange(portStr)
-	}
-
-	// 后续位置参数都是端口
-	for _, p := range posArgs[1:] {
-		ports = append(ports, parsePortRange(p)...)
+	if len(posArgs) > 0 {
+		// 合并位置参数为一段，用 parseHostSegment 解析
+		joined := strings.Join(posArgs, " ")
+		ht := parseHostSegment(joined)
+		host = ht.Host
+		ports = ht.Ports
 	}
 
 	// -p flag 补充

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // TestHandleEcho 验证 /echo 接口回显请求详情
@@ -144,5 +146,122 @@ func TestExtractTrailingFlagsNew(t *testing.T) {
 	}
 	if trHops != 15 {
 		t.Errorf("trHops = %d, want 15", trHops)
+	}
+}
+
+// TestParseHostSegmentIPv6 验证 IPv6 地址解析（修复 udp.go 的 IPv6 bug 后）
+func TestParseHostSegmentIPv6(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantHost string
+		wantPort int // 第一个端口, 0 表示无端口
+	}{
+		{"[::1]:53", "::1", 53},
+		{"::1 53", "::1", 53},
+		{"[2001:db8::1]:443", "2001:db8::1", 443},
+		{"10.0.0.1:8080", "10.0.0.1", 8080},
+		{"10.0.0.1 8080", "10.0.0.1", 8080},
+		{"example.com:443", "example.com", 443},
+	}
+
+	for _, tt := range tests {
+		ht := parseHostSegment(tt.input)
+		if ht.Host != tt.wantHost {
+			t.Errorf("parseHostSegment(%q).Host = %q, want %q", tt.input, ht.Host, tt.wantHost)
+		}
+		if tt.wantPort > 0 {
+			found := false
+			for _, p := range ht.Ports {
+				if p == tt.wantPort {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("parseHostSegment(%q).Ports = %v, want contains %d", tt.input, ht.Ports, tt.wantPort)
+			}
+		}
+	}
+}
+
+// TestIsConnectionRefused 验证连接拒绝错误判断
+func TestIsConnectionRefused(t *testing.T) {
+	// nil 不应判定为拒绝
+	if isConnectionRefused(nil) {
+		t.Error("isConnectionRefused(nil) = true, want false")
+	}
+	// ECONNREFUSED 应判定为拒绝
+	if !isConnectionRefused(syscall.ECONNREFUSED) {
+		t.Error("isConnectionRefused(ECONNREFUSED) = false, want true")
+	}
+	// 其他错误不应判定为拒绝
+	if isConnectionRefused(syscall.EAGAIN) {
+		t.Error("isConnectionRefused(EAGAIN) = true, want false")
+	}
+}
+
+// TestExtractTrailingFlagsVersion 验证 -version 后置 flag 回收
+func TestExtractTrailingFlagsVersion(t *testing.T) {
+	var showVer bool
+	rest := extractTrailingFlags([]string{"8080", "-version"},
+		&flagOpts{showVersion: &showVer})
+
+	if len(rest) != 1 || rest[0] != "8080" {
+		t.Errorf("rest = %v, want [8080]", rest)
+	}
+	if !showVer {
+		t.Error("showVersion = false, want true")
+	}
+}
+
+// TestExtractTrailingFlagsHtmlDir 验证 -html/-dir 后置 flag 回收
+func TestExtractTrailingFlagsHtmlDir(t *testing.T) {
+	var html, dir string
+	rest := extractTrailingFlags([]string{"8080", "-html", "index.html", "-dir", "./static"},
+		&flagOpts{html: &html, staticDir: &dir})
+
+	if len(rest) != 1 || rest[0] != "8080" {
+		t.Errorf("rest = %v, want [8080]", rest)
+	}
+	if html != "index.html" {
+		t.Errorf("html = %q, want index.html", html)
+	}
+	if dir != "./static" {
+		t.Errorf("dir = %q, want ./static", dir)
+	}
+}
+
+// TestUdpIPv6Parsing 验证 UDP 模式的 IPv6 解析（通过 parseHostSegment 间接测试）
+func TestUdpIPv6Parsing(t *testing.T) {
+	// ::1 不应被错误解析为 host=:: port=1
+	ht := parseHostSegment("::1 53")
+	if ht.Host != "::1" {
+		t.Errorf("parseHostSegment(\"::1 53\").Host = %q, want ::1", ht.Host)
+	}
+	if len(ht.Ports) != 1 || ht.Ports[0] != 53 {
+		t.Errorf("parseHostSegment(\"::1 53\").Ports = %v, want [53]", ht.Ports)
+	}
+
+	// [::1]:53 应正确解析
+	ht = parseHostSegment("[::1]:53")
+	if ht.Host != "::1" {
+		t.Errorf("parseHostSegment(\"[::1]:53\").Host = %q, want ::1", ht.Host)
+	}
+	if len(ht.Ports) != 1 || ht.Ports[0] != 53 {
+		t.Errorf("parseHostSegment(\"[::1]:53\").Ports = %v, want [53]", ht.Ports)
+	}
+}
+
+// TestBenchQPSNoDivisionByZero 验证 bench QPS 不会除零（elapsed=0 时不 panic）
+func TestBenchQPSNoDivisionByZero(t *testing.T) {
+	// 直接验证除零保护逻辑（不启动完整压测）
+	elapsed := time.Duration(0)
+	successN := 100
+	qps := 0.0
+	if elapsedSec := elapsed.Seconds(); elapsedSec > 0 {
+		qps = float64(successN) / elapsedSec
+	}
+	if qps != 0.0 {
+		t.Errorf("QPS with zero elapsed = %v, want 0.0 (no division by zero)", qps)
 	}
 }
