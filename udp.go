@@ -35,9 +35,9 @@ func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 		ports = ht.Ports
 	}
 
-	// -p flag 补充
-	if len(ports) == 0 && flagPorts != "" {
-		ports = parsePortRange(flagPorts)
+	// -p flag 补充（总是合并，支持 "port-test -udp 10.0.0.1 -p 53 123" 空格分隔）
+	if flagPorts != "" {
+		ports = append(ports, parsePortRange(flagPorts)...)
 	}
 	ports = dedupePorts(ports)
 

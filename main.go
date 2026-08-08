@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -85,6 +86,7 @@ func printUsage() {
 	fmt.Println("    port-test -tcping 10.0.0.1:8080#10.0.0.2:443  多主机用#分隔")
 	fmt.Println("    port-test -tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
 	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 80,443      传统写法")
+	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 80 443      传统写法(空格分隔)")
 	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 1-1024      端口范围")
 	fmt.Println("    port-test -tcping 10.0.0.1:80,443 -json-out   JSON 输出")
 	fmt.Println("    端口分隔符: , 、 -")
@@ -101,6 +103,7 @@ func printUsage() {
 	fmt.Println("  SCAN 模式 (端口扫描):")
 	fmt.Println("    port-test -scan 10.0.0.1                 扫描常见端口")
 	fmt.Println("    port-test -scan 10.0.0.1 -p 1-1024       扫描指定范围")
+	fmt.Println("    port-test -scan 10.0.0.1 -p 80 443 8080  空格分隔端口")
 	fmt.Println("    port-test -scan 10.0.0.1 -p 1-65535      全端口扫描")
 	fmt.Println("    port-test -scan 10.0.0.1 -json-out       JSON 输出")
 	fmt.Println()
@@ -323,8 +326,21 @@ func main() {
 func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int, jsonOut bool) {
 	var targets []HostTarget
 
-	if len(posArgs) > 0 {
-		// 合并所有位置参数为一个字符串
+	if flagIP != "" {
+		// 传统写法: -ip 是主机, -p 和位置参数都是端口
+		// 支持 "port-test -tcping -ip 10.0.0.1 -p 80 443" 空格分隔端口
+		ht := HostTarget{Host: flagIP}
+		if flagPorts != "" {
+			ht.Ports = append(ht.Ports, parsePortRange(flagPorts)...)
+		}
+		for _, p := range posArgs {
+			ht.Ports = append(ht.Ports, parsePortRange(p)...)
+		}
+		if len(ht.Ports) > 0 {
+			targets = append(targets, ht)
+		}
+	} else if len(posArgs) > 0 {
+		// 新写法: 位置参数是 host:port / host port ...
 		joined := strings.Join(posArgs, " ")
 
 		// 按 ! # = + \ / ? 分割多主机
@@ -339,15 +355,6 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 				targets = append(targets, ht)
 			}
 		}
-	}
-
-	// 回退到传统 -ip -p 写法
-	if len(targets) == 0 && flagIP != "" {
-		ht := HostTarget{Host: flagIP}
-		if flagPorts != "" {
-			ht.Ports = parsePortRange(flagPorts)
-		}
-		targets = append(targets, ht)
 	}
 
 	// 校验
@@ -540,30 +547,42 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	fmt.Println("  ------------------------------------")
 
 	// 启动 HTTP 服务器
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(config.Ports))
+	// 优雅退出策略: 任一端口启动失败(如被占用)时, 关闭所有已启动的 server 再退出
+	servers := make([]*http.Server, 0, len(config.Ports))
+	var mu sync.Mutex
+	serverErr := make(chan error, len(config.Ports))
 
 	for _, port := range config.Ports {
-		wg.Add(1)
-		go func(p int) {
-			defer wg.Done()
-			if err := startServer(p); err != nil {
-				errCh <- fmt.Errorf("端口 %d 启动失败: %v", p, err)
+		srv := newServer(port)
+		mu.Lock()
+		servers = append(servers, srv)
+		mu.Unlock()
+
+		go func(s *http.Server) {
+			var err error
+			if config.TLSCert != "" {
+				err = s.ListenAndServeTLS(config.TLSCert, config.TLSKey)
+			} else {
+				err = s.ListenAndServe()
 			}
-		}(port)
+			if err != nil && err != http.ErrServerClosed {
+				serverErr <- fmt.Errorf("端口 %s 启动失败: %v", strings.TrimPrefix(s.Addr, ":"), err)
+			}
+		}(srv)
 	}
 
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
+	// 等待任一 server 出错（正常运行时会一直阻塞在此）
+	err := <-serverErr
+	fmt.Println(err)
 
-	for err := range errCh {
-		fmt.Println(err)
-		os.Exit(exitInterrupted)
+	// 优雅关闭所有已启动的 server（含出错端口自身）
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for _, s := range servers {
+		_ = s.Shutdown(ctx)
 	}
-
-	select {}
+	fmt.Println("  已关闭所有服务器")
+	os.Exit(exitInterrupted)
 }
 
 // parsePorts 解析端口字符串
@@ -589,8 +608,8 @@ func parsePorts(s string) ([]int, error) {
 	return ports, nil
 }
 
-// startServer 启动单个 HTTP 服务器
-func startServer(port int) error {
+// newServer 创建单个 HTTP 服务器实例（不监听，返回后由调用方 ListenAndServe）
+func newServer(port int) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleRoot)
 	mux.HandleFunc("/health", handleHealth)
@@ -612,10 +631,16 @@ func startServer(port int) error {
 	}
 
 	fmt.Printf("  服务器启动: %s://localhost:%d\n", getProtocol(), port)
+	return server
+}
+
+// startServer 启动单个 HTTP 服务器（测试用，保持向后兼容）
+func startServer(port int) error {
+	srv := newServer(port)
 	if config.TLSCert != "" {
-		return server.ListenAndServeTLS(config.TLSCert, config.TLSKey)
+		return srv.ListenAndServeTLS(config.TLSCert, config.TLSKey)
 	}
-	return server.ListenAndServe()
+	return srv.ListenAndServe()
 }
 
 // getProtocol 返回当前协议类型（http/https）

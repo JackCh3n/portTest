@@ -33,7 +33,8 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int, jsonOut boo
 	}
 	host := posArgs[0]
 
-	// 确定端口列表：-p 优先，否则常见端口表
+	// 确定端口列表：-p 优先 + 位置参数补充
+	// 支持 "port-test -scan 10.0.0.1 -p 80 443" 空格分隔端口
 	var ports []int
 	if flagPorts != "" {
 		ports = parsePortRange(flagPorts)
@@ -43,6 +44,10 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int, jsonOut boo
 		}
 	} else {
 		ports = append([]int(nil), scanCommonPorts...)
+	}
+	// 位置参数第 2 个起视为额外端口
+	for _, p := range posArgs[1:] {
+		ports = append(ports, parsePortRange(p)...)
 	}
 	ports = dedupePorts(ports)
 	sort.Ints(ports)

@@ -83,6 +83,9 @@ port-test -tcping [::1]:80
 # 传统写法（向后兼容）
 port-test -tcping -ip 10.0.0.1 -p 80,443,3306
 
+# 传统写法（空格分隔端口）
+port-test -tcping -ip 10.0.0.1 -p 80 443 3306
+
 # 指定超时和重复次数
 port-test -tcping -ip 10.0.0.1 -p 22,80 -timeout 5 -count 3 -interval 2
 
@@ -132,6 +135,9 @@ port-test -scan 10.0.0.1 -p 1-65535 -timeout 1
 
 # 自定义端口
 port-test -scan 10.0.0.1 -p 80,443,3306,6379
+
+# 空格分隔端口
+port-test -scan 10.0.0.1 -p 80 443 3306 6379
 
 # JSON 输出（脚本解析）
 port-test -scan 10.0.0.1 -p 1-1024 -json-out
