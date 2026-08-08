@@ -85,7 +85,7 @@ func TestScanLocalOpenPort(t *testing.T) {
 	defer srv.Close()
 
 	// 扫描本地常见端口（不依赖特定端口，验证引擎可用性）
-	runScanMode([]string{"127.0.0.1"}, "", 2)
+	runScanMode([]string{"127.0.0.1"}, "", 2, false)
 }
 
 // TestRunUdpModeLocal 验证 UDP 探测逻辑（本地 UDP 服务）
@@ -289,5 +289,73 @@ func TestDnsServerAddress(t *testing.T) {
 		if got := buildAddr(tt.input); got != tt.expected {
 			t.Errorf("buildAddr(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+// TestParsePortRangeBounds 验证端口范围边界校验（修复 12345-70000 越界 bug）
+func TestParsePortRangeBounds(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []int
+	}{
+		// 正常范围
+		{"1-5", []int{1, 2, 3, 4, 5}},
+		{"80-82", []int{80, 81, 82}},
+		// 完整端口范围
+		{"1-65535", []int{1}}, // 只验证首位，避免大数组
+		// 越界: 结束端口 > 65535 应拒绝
+		{"12345-70000", nil},
+		// 越界: 起始端口 > 65535 应拒绝
+		{"70000-70001", nil},
+		// 非法: 起始 > 结束 应拒绝
+		{"1024-80", nil},
+		// 非法: 端口 0 应拒绝
+		{"0-80", nil},
+		// 非法: 非数字
+		{"abc-def", nil},
+	}
+
+	for _, tt := range tests {
+		ports := parsePortRange(tt.input)
+		if tt.expected == nil {
+			if len(ports) != 0 {
+				t.Errorf("parsePortRange(%q) = %v, want nil/empty (边界校验失败)", tt.input, ports)
+			}
+			continue
+		}
+		if tt.input == "1-65535" {
+			if len(ports) != 65535 {
+				t.Errorf("parsePortRange(1-65535) 长度 = %d, want 65535", len(ports))
+			}
+			if ports[0] != 1 {
+				t.Errorf("parsePortRange(1-65535)[0] = %d, want 1", ports[0])
+			}
+			continue
+		}
+		if len(ports) != len(tt.expected) {
+			t.Errorf("parsePortRange(%q) = %v, want %v", tt.input, ports, tt.expected)
+			continue
+		}
+		for i := range ports {
+			if ports[i] != tt.expected[i] {
+				t.Errorf("parsePortRange(%q)[%d] = %d, want %d", tt.input, i, ports[i], tt.expected[i])
+			}
+		}
+	}
+}
+
+// TestPortRangeSinglePort 验证单端口经过 parsePortRange 也走边界校验
+func TestPortRangeSinglePort(t *testing.T) {
+	// 合法单端口
+	if ports := parsePortRange("8080"); len(ports) != 1 || ports[0] != 8080 {
+		t.Errorf("parsePortRange(8080) = %v, want [8080]", ports)
+	}
+	// 非法单端口（>65535）应返回空
+	if ports := parsePortRange("70000"); len(ports) != 0 {
+		t.Errorf("parsePortRange(70000) = %v, want empty", ports)
+	}
+	// 非法单端口（0）应返回空
+	if ports := parsePortRange("0"); len(ports) != 0 {
+		t.Errorf("parsePortRange(0) = %v, want empty", ports)
 	}
 }

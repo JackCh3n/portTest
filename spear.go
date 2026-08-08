@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +38,38 @@ type HostTarget struct {
 }
 
 // MultiTcpingMode 多主机 TCPing 测试
-func MultiTcpingMode(targets []HostTarget, timeout time.Duration, count int, interval time.Duration) {
+func MultiTcpingMode(targets []HostTarget, timeout time.Duration, count int, interval time.Duration, jsonOut bool) {
+	if jsonOut {
+		// JSON 输出模式：收集所有主机结果一次性输出
+		type targetResult struct {
+			Target  string       `json:"target"`
+			Results []PortResult `json:"results"`
+			Total   int          `json:"total"`
+			Success int          `json:"success"`
+			Failed  int          `json:"failed"`
+			Time    string       `json:"time"`
+		}
+		all := make([]targetResult, 0, len(targets))
+		for _, t := range targets {
+			result := scanTarget(t.Host, t.Ports, timeout)
+			all = append(all, targetResult{
+				Target:  result.Target,
+				Results: result.Results,
+				Total:   result.Total,
+				Success: result.Success,
+				Failed:  result.Failed,
+				Time:    result.TotalTime.Round(time.Millisecond).String(),
+			})
+		}
+		data, err := json.MarshalIndent(all, "", "  ")
+		if err != nil {
+			fmt.Printf("  JSON 序列化失败: %v\n", err)
+			os.Exit(exitInterrupted)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
 	for i, t := range targets {
 		if i > 0 {
 			fmt.Println()
@@ -60,8 +93,12 @@ func MultiTcpingMode(targets []HostTarget, timeout time.Duration, count int, int
 
 // TcpingMode TCPing 模式 - TCP 端口连通性测试 (单主机, 向后兼容)
 func TcpingMode(target string, ports []int, timeout time.Duration, count int, interval time.Duration) {
-	MultiTcpingMode([]HostTarget{{Host: target, Ports: ports}}, timeout, count, interval)
+	MultiTcpingMode([]HostTarget{{Host: target, Ports: ports}}, timeout, count, interval, false)
 }
+
+// maxScanConcurrency 扫描最大并发数，防止全端口扫描时一次性开 65535 个
+// goroutine 导致文件描述符耗尽（每并发一个 socket）
+const maxScanConcurrency = 1024
 
 // scanTarget 对目标执行单次端口扫描
 func scanTarget(target string, ports []int, timeout time.Duration) ScanResult {
@@ -75,10 +112,15 @@ func scanTarget(target string, ports []int, timeout time.Duration) ScanResult {
 	var wg sync.WaitGroup
 	resultCh := make(chan PortResult, len(ports))
 
+	// 信号量限制并发: 最多同时 maxScanConcurrency 个探测
+	sem := make(chan struct{}, maxScanConcurrency)
+
 	for _, port := range ports {
 		wg.Add(1)
+		sem <- struct{}{} // 获取令牌（满时阻塞）
 		go func(p int) {
 			defer wg.Done()
+			defer func() { <-sem }() // 释放令牌
 			resultCh <- pingPort(target, p, timeout)
 		}(port)
 	}
@@ -207,10 +249,15 @@ func QuickPing(target string, ports []int, timeout time.Duration) (int, []PortRe
 	var wg sync.WaitGroup
 	resultCh := make(chan PortResult, len(ports))
 
+	// 信号量限制并发（同 scanTarget）
+	sem := make(chan struct{}, maxScanConcurrency)
+
 	for _, port := range ports {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(p int) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			r := pingPort(target, p, timeout)
 			resultCh <- r
 		}(port)
@@ -243,7 +290,8 @@ func parsePortRange(s string) []int {
 		parts := strings.SplitN(s, "-", 2)
 		start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
 		end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-		if err1 == nil && err2 == nil && start > 0 && end > start && end <= 65535 {
+		// 完整校验: 起止端口均在 1-65535 内，且 start <= end
+		if err1 == nil && err2 == nil && start >= 1 && start <= 65535 && end >= start && end <= 65535 {
 			ports := make([]int, 0, end-start+1)
 			for i := start; i <= end; i++ {
 				ports = append(ports, i)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -22,12 +23,13 @@ var scanCommonPorts = []int{
 //   port-test -scan 10.0.0.1 -p 80,443,8080 扫描指定端口
 //   port-test -scan 10.0.0.1 -p 1-65535     全端口扫描
 //   port-test -scan 10.0.0.1 -timeout 2     自定义超时
-func runScanMode(posArgs []string, flagPorts string, timeoutSec int) {
+//   port-test -scan 10.0.0.1 -json-out      JSON 输出
+func runScanMode(posArgs []string, flagPorts string, timeoutSec int, jsonOut bool) {
 	// 校验主机
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定要扫描的主机")
 		fmt.Println("  用法: port-test -scan <host> [-p <ports/range>] [-timeout <sec>]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 	host := posArgs[0]
 
@@ -37,7 +39,7 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int) {
 		ports = parsePortRange(flagPorts)
 		if len(ports) == 0 {
 			fmt.Printf("  错误: 无效端口: %s\n", flagPorts)
-			os.Exit(1)
+			os.Exit(exitUsage)
 		}
 	} else {
 		ports = append([]int(nil), scanCommonPorts...)
@@ -47,6 +49,39 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int) {
 
 	timeout := time.Duration(timeoutSec) * time.Second
 
+	// 复用 tcping 扫描引擎
+	result := scanTarget(host, ports, timeout)
+
+	// JSON 输出模式
+	if jsonOut {
+		type scanJSON struct {
+			Target  string       `json:"target"`
+			Results []PortResult `json:"results"`
+			Total   int          `json:"total"`
+			Open    int          `json:"open"`
+			Time    string       `json:"time"`
+		}
+		openCount := 0
+		for _, r := range result.Results {
+			if r.Status == "open" {
+				openCount++
+			}
+		}
+		data, err := json.MarshalIndent(scanJSON{
+			Target:  result.Target,
+			Results: result.Results,
+			Total:   result.Total,
+			Open:    openCount,
+			Time:    result.TotalTime.Round(time.Millisecond).String(),
+		}, "", "  ")
+		if err != nil {
+			fmt.Printf("  JSON 序列化失败: %v\n", err)
+			os.Exit(exitInterrupted)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
 	// 打印扫描信息
 	fmt.Printf("  目标: %s\n", host)
 	fmt.Printf("  端口数: %d", len(ports))
@@ -55,9 +90,6 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int) {
 	}
 	fmt.Printf("\n  超时: %v\n", timeout)
 	fmt.Println("  ------------------------------------")
-
-	// 复用 tcping 扫描引擎
-	result := scanTarget(host, ports, timeout)
 
 	// 输出开放端口
 	fmt.Println("  开放端口:")

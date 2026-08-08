@@ -33,13 +33,13 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定目标 URL")
 		fmt.Println("  用法: port-test -curl <url> [-X <method>] [-d <data>] [-H <header>] [-k]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	url := posArgs[0]
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		fmt.Printf("  错误: 无效 URL (需以 http:// 或 https:// 开头): %s\n", url)
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 默认方法 GET，指定 -d 时默认 POST（与 curl 行为一致）
@@ -60,7 +60,7 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		fmt.Printf("  请求构造失败: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 设置请求头（-H 可多次指定）
@@ -134,7 +134,7 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("  请求失败: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitConnFailed)
 	}
 	defer resp.Body.Close()
 
@@ -143,7 +143,7 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	respBody, err := io.ReadAll(limitedBody)
 	if err != nil {
 		fmt.Printf("  读取响应失败: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitConnFailed)
 	}
 
 	elapsed := time.Since(startTime)

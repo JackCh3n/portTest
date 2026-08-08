@@ -19,7 +19,7 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定要查询的域名")
 		fmt.Println("  用法: port-test -dns <domain> [-type <A|AAAA|MX|CNAME|TXT|NS>]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 	domain := posArgs[0]
 

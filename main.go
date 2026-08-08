@@ -20,6 +20,8 @@ type Config struct {
 	JSON      string
 	HTML      string
 	StaticDir string
+	TLSCert   string // HTTPS 证书路径（可选，指定后启动 TLS）
+	TLSKey    string // HTTPS 私钥路径
 }
 
 var (
@@ -35,7 +37,15 @@ type JSONResponse struct {
 	Msg  string `json:"msg"`
 }
 
-const version = "1.0.0"
+const version = "1.1.0"
+
+// 退出码语义化，便于脚本根据退出码判断结果
+const (
+	exitOK          = 0 // 成功
+	exitUsage       = 1 // 参数/用法错误
+	exitConnFailed  = 2 // 连接失败（tcping/curl/scan/udp 等探测类操作失败）
+	exitInterrupted = 3 // 被中断（如端口占用、内部错误）
+)
 
 // 打印工具头信息
 func printHeader() {
@@ -65,6 +75,7 @@ func printUsage() {
 	fmt.Println("    port-test -p 8080 -code 403                   指定状态码")
 	fmt.Println("    port-test -p 8080 -html index.html            指定 HTML 文件")
 	fmt.Println("    port-test -p 8080 -json '{\"code\":200,\"msg\":\"ok\"}'")
+	fmt.Println("    port-test -p 8443 -tls-cert cert.pem -tls-key key.pem  HTTPS")
 	fmt.Println("    /echo 接口: 回显请求的 method/header/body (配合 curl 调试)")
 	fmt.Println()
 	fmt.Println("  TCPing 模式:")
@@ -75,6 +86,7 @@ func printUsage() {
 	fmt.Println("    port-test -tcping 10.0.0.1 80,443#10.0.0.2 9999  多主机多端口")
 	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 80,443      传统写法")
 	fmt.Println("    port-test -tcping -ip 10.0.0.1 -p 1-1024      端口范围")
+	fmt.Println("    port-test -tcping 10.0.0.1:80,443 -json-out   JSON 输出")
 	fmt.Println("    端口分隔符: , 、 -")
 	fmt.Println("    多主机分隔符: ! # = + \\ / ? (均无需引号)")
 	fmt.Println()
@@ -90,6 +102,7 @@ func printUsage() {
 	fmt.Println("    port-test -scan 10.0.0.1                 扫描常见端口")
 	fmt.Println("    port-test -scan 10.0.0.1 -p 1-1024       扫描指定范围")
 	fmt.Println("    port-test -scan 10.0.0.1 -p 1-65535      全端口扫描")
+	fmt.Println("    port-test -scan 10.0.0.1 -json-out       JSON 输出")
 	fmt.Println()
 	fmt.Println("  BENCH 模式 (HTTP 压测):")
 	fmt.Println("    port-test -bench https://example.com                  100请求/10并发")
@@ -112,6 +125,7 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("  全局选项:")
 	fmt.Println("    -timeout <sec>    连接超时时间 (tcping/curl/scan/udp/traceroute, 默认: 3)")
+	fmt.Println("    -json-out         JSON 输出 (tcping/scan, 便于脚本解析)")
 	fmt.Println("    -count <num>      测试次数 (tcping, 默认: 1)")
 	fmt.Println("    -interval <sec>   重试间隔秒 (tcping, 默认: 1)")
 	fmt.Println("    -X <method>       HTTP 方法 (curl/bench, 默认: GET)")
@@ -128,6 +142,7 @@ func printUsage() {
 	fmt.Println("    -m <num>          最大跳数 (traceroute, 默认: 30)")
 	fmt.Println("    -w <sec>          每跳超时 (traceroute, 默认: 1)")
 	fmt.Println("    -version          显示版本信息")
+	fmt.Println("  退出码: 0=成功 1=参数错误 2=连接失败 3=内部错误")
 	fmt.Println()
 }
 
@@ -138,6 +153,8 @@ func main() {
 	jsonStr := flag.String("json", "", "JSON 响应内容")
 	htmlPath := flag.String("html", "", "HTML 文件路径")
 	staticDir := flag.String("dir", "", "静态文件目录")
+	tlsCert := flag.String("tls-cert", "", "HTTPS 证书文件路径 (port 模式, 指定后启动 HTTPS)")
+	tlsKey := flag.String("tls-key", "", "HTTPS 私钥文件路径 (port 模式)")
 
 	// 模式开关（替代原 -mode 参数）
 	usePort := flag.Bool("port", false, "Port 模式: 启动 HTTP 测试服务")
@@ -154,6 +171,7 @@ func main() {
 	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping/curl/scan/udp/traceroute 模式)")
 	count := flag.Int("count", 1, "测试次数 (tcping 模式)")
 	interval := flag.Int("interval", 1, "重试间隔(秒, tcping 模式)")
+	jsonOut := flag.Bool("json-out", false, "输出 JSON 结果 (tcping/scan 模式)")
 
 	// CURL/BENCH 参数
 	method := flag.String("X", "", "HTTP 方法 (curl/bench 模式, 默认 GET)")
@@ -216,6 +234,9 @@ func main() {
 			html:          htmlPath,
 			jsonStr:       jsonStr,
 			staticDir:     staticDir,
+			tlsCert:       tlsCert,
+			tlsKey:        tlsKey,
+			jsonOut:       jsonOut,
 		})
 
 	// 显示版本（可能在 flag.Parse 或 extractTrailingFlags 中被设置）
@@ -244,7 +265,7 @@ func main() {
 	}
 	if modes > 1 {
 		fmt.Println("  错误: 只能指定一种模式 (-port / -tcping / -curl / -scan / -bench / -udp / -dns / -traceroute 互斥)")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 根据模式运行
@@ -255,11 +276,11 @@ func main() {
 
 	case *useTcping:
 		printHeader()
-		runTcpingMode(posArgs, *target, *portStr, *timeout, *count, *interval)
+		runTcpingMode(posArgs, *target, *portStr, *timeout, *count, *interval, *jsonOut)
 
 	case *useScan:
 		printHeader()
-		runScanMode(posArgs, *portStr, *timeout)
+		runScanMode(posArgs, *portStr, *timeout, *jsonOut)
 
 	case *useBench:
 		printHeader()
@@ -284,7 +305,7 @@ func main() {
 
 	default: // *usePort
 		printHeader()
-		runPortMode(posArgs, *portStr, *code, *jsonStr, *htmlPath, *staticDir)
+		runPortMode(posArgs, *portStr, *code, *jsonStr, *htmlPath, *staticDir, *tlsCert, *tlsKey)
 	}
 }
 
@@ -298,7 +319,8 @@ func main() {
 //   port-test -tcping 10.0.0.1:8080#10.0.0.2:443      多主机用#分隔
 //   port-test -tcping 10.0.0.1:8080,443#10.0.0.2:9999 多主机多端口
 //   port-test -tcping -ip 10.0.0.1 -p 80,443           传统写法
-func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int) {
+//   port-test -tcping 10.0.0.1:8080 -json-out          JSON 输出
+func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int, jsonOut bool) {
 	var targets []HostTarget
 
 	if len(posArgs) > 0 {
@@ -333,18 +355,18 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 		fmt.Println("  错误: 请指定目标地址")
 		fmt.Println("  用法: port-test -tcping <host:port> [port2 ...] [# host2:port ...]")
 		fmt.Println("  或:   port-test -tcping -ip <host> -p <ports>")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 	for i := range targets {
 		if len(targets[i].Ports) == 0 {
 			fmt.Printf("  错误: 主机 %s 未指定端口\n", targets[i].Host)
-			os.Exit(1)
+			os.Exit(exitUsage)
 		}
 		// 去除重复端口
 		targets[i].Ports = dedupePorts(targets[i].Ports)
 	}
 
-	MultiTcpingMode(targets, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second)
+	MultiTcpingMode(targets, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second, jsonOut)
 }
 
 // dedupePorts 去除重复端口
@@ -412,7 +434,8 @@ func parseHostSegment(seg string) HostTarget {
 //   port-test -port 8080
 //   port-test -port 8080 9090 3000
 //   port-test -p 8080,9090 (传统写法)
-func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath, staticDir string) {
+//   port-test -p 8443 -tls-cert cert.pem -tls-key key.pem (HTTPS)
+func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath, staticDir, tlsCert, tlsKey string) {
 	var ports []int
 
 	// 优先使用位置参数
@@ -434,7 +457,7 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		parsed, err := parsePorts(flagPorts)
 		if err != nil {
 			fmt.Printf("  端口解析错误: %v\n", err)
-			os.Exit(1)
+			os.Exit(exitUsage)
 		}
 		ports = parsed
 	}
@@ -447,7 +470,7 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	// 校验 HTTP 状态码（Go 要求 100-999，否则 WriteHeader panic）
 	if code < 100 || code > 999 {
 		fmt.Printf("  错误: 无效 HTTP 状态码: %d (有效范围 100-999)\n", code)
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 去重端口，避免同一端口重复启动导致监听冲突
@@ -459,6 +482,24 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		JSON:      jsonStr,
 		HTML:      htmlPath,
 		StaticDir: staticDir,
+		TLSCert:   tlsCert,
+		TLSKey:    tlsKey,
+	}
+
+	// 校验 TLS 配置：只指定 cert 或 key 之一时报错
+	if (config.TLSCert == "") != (config.TLSKey == "") {
+		fmt.Println("  错误: -tls-cert 和 -tls-key 必须同时指定")
+		os.Exit(exitUsage)
+	}
+	if config.TLSCert != "" {
+		if _, err := os.Stat(config.TLSCert); err != nil {
+			fmt.Printf("  读取证书文件失败: %v\n", err)
+			os.Exit(exitUsage)
+		}
+		if _, err := os.Stat(config.TLSKey); err != nil {
+			fmt.Printf("  读取私钥文件失败: %v\n", err)
+			os.Exit(exitUsage)
+		}
 	}
 
 	// 加载 HTML 文件（如果指定）
@@ -466,7 +507,7 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		data, err := os.ReadFile(config.HTML)
 		if err != nil {
 			fmt.Printf("  读取 HTML 文件失败: %v\n", err)
-			os.Exit(1)
+			os.Exit(exitUsage)
 		}
 		htmlContent = data
 		fmt.Printf("  已加载 HTML 文件: %s\n", config.HTML)
@@ -494,6 +535,7 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	// 打印启动信息
 	fmt.Printf("  端口: %v\n", config.Ports)
 	fmt.Printf("  状态码: %d\n", config.Code)
+	fmt.Printf("  协议: %s\n", getProtocol())
 	fmt.Printf("  响应类型: %s\n", getResponseType())
 	fmt.Println("  ------------------------------------")
 
@@ -518,7 +560,7 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 
 	for err := range errCh {
 		fmt.Println(err)
-		os.Exit(1)
+		os.Exit(exitInterrupted)
 	}
 
 	select {}
@@ -569,8 +611,19 @@ func startServer(port int) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	fmt.Printf("  服务器启动: http://localhost:%d\n", port)
+	fmt.Printf("  服务器启动: %s://localhost:%d\n", getProtocol(), port)
+	if config.TLSCert != "" {
+		return server.ListenAndServeTLS(config.TLSCert, config.TLSKey)
+	}
 	return server.ListenAndServe()
+}
+
+// getProtocol 返回当前协议类型（http/https）
+func getProtocol() string {
+	if config.TLSCert != "" {
+		return "https"
+	}
+	return "http"
 }
 
 // handleRoot 根路径处理器
@@ -695,11 +748,13 @@ type flagOpts struct {
 	useDns, useTraceroute    *bool
 	benchTotal, benchConc    *int
 	benchKeepAlive           *bool
+	jsonOut                  *bool
 	dnsType                  *string
 	trTcp                    *bool
 	trMaxHops, trWait        *int
 	showVersion              *bool
 	html, jsonStr, staticDir *string
+	tlsCert, tlsKey          *string
 }
 
 // extractTrailingFlags 从位置参数中回收后置的 flag
@@ -726,6 +781,8 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		"-html":     func(v string) { if opts.html != nil { *opts.html = v } },
 		"-json":     func(v string) { if opts.jsonStr != nil { *opts.jsonStr = v } },
 		"-dir":      func(v string) { if opts.staticDir != nil { *opts.staticDir = v } },
+		"-tls-cert": func(v string) { if opts.tlsCert != nil { *opts.tlsCert = v } },
+		"-tls-key":  func(v string) { if opts.tlsKey != nil { *opts.tlsKey = v } },
 	}
 
 	rest := make([]string, 0, len(args))
@@ -746,6 +803,10 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		case "-ka":
 			if opts.benchKeepAlive != nil {
 				*opts.benchKeepAlive = true
+			}
+		case "-json-out":
+			if opts.jsonOut != nil {
+				*opts.jsonOut = true
 			}
 		case "-port":
 			if opts.usePort != nil {

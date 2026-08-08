@@ -23,7 +23,7 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定目标主机")
 		fmt.Println("  用法: port-test -traceroute <host> [-T] [-p <port>] [-m <hops>] [-w <sec>]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 	target := posArgs[0]
 
@@ -31,12 +31,12 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	ips, err := net.LookupIP(target)
 	if err != nil || len(ips) == 0 {
 		fmt.Printf("  错误: 无法解析目标: %s\n", target)
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 	dst := ips[0]
 	if dst.To4() == nil {
 		fmt.Println("  错误: 暂不支持 IPv6 traceroute")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 参数默认值
@@ -67,7 +67,7 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	icmpConn, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
 		fmt.Printf("  错误: 无法监听 ICMP (需要管理员/root 权限): %v\n", err)
-		os.Exit(1)
+		os.Exit(exitInterrupted)
 	}
 	defer icmpConn.Close()
 	icmpPC := ipv4.NewPacketConn(icmpConn)

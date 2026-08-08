@@ -26,12 +26,12 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定压测 URL")
 		fmt.Println("  用法: port-test -bench <url> [-n <请求数>] [-c <并发>] [-X <method>] [-d <data>]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 	url := posArgs[0]
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		fmt.Printf("  错误: 无效 URL (需以 http:// 或 https:// 开头): %s\n", url)
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 参数校验
@@ -64,7 +64,7 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 		req, err := http.NewRequest(method, url, body)
 		if err != nil {
 			fmt.Printf("  请求构造失败: %v\n", err)
-			os.Exit(1)
+			os.Exit(exitUsage)
 		}
 		for _, h := range headers {
 			h = strings.TrimSpace(h)

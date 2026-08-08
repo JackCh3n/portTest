@@ -4,16 +4,17 @@
 
 ## 功能特性
 
-- 🛡️ **Port 模式**：启动 HTTP 服务器占用端口，返回自定义 JSON/HTML/状态码，内置 `/echo` 回显接口
+- 🛡️ **Port 模式**：启动 HTTP/HTTPS 服务器占用端口，返回自定义 JSON/HTML/状态码，内置 `/echo` 回显接口
 - 🗡️ **TCPing 模式**：主动 TCP 连接测试，验证网络是否畅通
 - 🌐 **CURL 模式**：模拟 curl 发送 HTTP/HTTPS 请求，支持 GET/POST、自定义头、忽略证书、跟随重定向
-- 🔍 **SCAN 模式**：快速端口扫描（常见端口/自定义范围/全端口）
-- ⚡ **BENCH 模式**：轻量 HTTP 压测，输出 QPS/延迟分布（P50/P90/P99）
+- 🔍 **SCAN 模式**：快速端口扫描（常见端口/自定义范围/全端口），自动限制并发防资源耗尽
+- ⚡ **BENCH 模式**：轻量 HTTP 压测，输出 QPS/延迟分布（P50/P90/P99），支持短连接/keep-alive
 - 📦 **UDP 模式**：UDP 连通性测试
-- 🌏 **DNS 模式**：DNS 记录查询（A/AAAA/MX/CNAME/TXT/NS）
+- 🌏 **DNS 模式**：DNS 记录查询（A/AAAA/MX/CNAME/TXT/NS），支持自定义服务器端口
 - 🛰️ **TRACEROUTE 模式**：UDP/TCP 路由追踪（需管理员/root 权限）
 - 🌐 多主机批量测试，支持 IPv4/IPv6/域名
 - 🔧 丰富的位置参数写法，兼容传统 `-ip`/`-p` 写法
+- 📊 脚本友好：`-json-out` 机器可读输出 + 语义化退出码
 - 💻 跨平台：Windows / Linux / macOS / FreeBSD / ARM / MIPS / LoongArch
 
 ## 快速开始
@@ -41,6 +42,9 @@ port-test -port 8080 -html ./index.html
 
 # 返回自定义 JSON
 port-test -port 8080 -json '{"code":200,"msg":"ok"}'
+
+# 启动 HTTPS 服务（自签名证书）
+port-test -port 8443 -tls-cert cert.pem -tls-key key.pem
 
 # 传统写法（-p 指定端口）
 port-test -p 8080,9090 -code 200
@@ -81,6 +85,9 @@ port-test -tcping -ip 10.0.0.1 -p 80,443,3306
 
 # 指定超时和重复次数
 port-test -tcping -ip 10.0.0.1 -p 22,80 -timeout 5 -count 3 -interval 2
+
+# JSON 输出（脚本解析）
+port-test -tcping 10.0.0.1:80,443 -json-out
 ```
 
 ### CURL 模式
@@ -125,7 +132,12 @@ port-test -scan 10.0.0.1 -p 1-65535 -timeout 1
 
 # 自定义端口
 port-test -scan 10.0.0.1 -p 80,443,3306,6379
+
+# JSON 输出（脚本解析）
+port-test -scan 10.0.0.1 -p 1-1024 -json-out
 ```
+
+> 全端口扫描自动限制并发（最多 1024 同时探测），避免耗尽文件描述符。
 
 ### BENCH 模式（HTTP 压测）
 
@@ -243,7 +255,19 @@ port-test -traceroute example.com -m 20 -w 2
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `-timeout` | `3` | 连接超时（秒，tcping/curl/scan/udp/traceroute） |
+| `-json-out` | `false` | JSON 输出（tcping/scan），便于脚本解析 |
 | `-version` | - | 显示版本信息 |
+
+### 退出码
+
+| 退出码 | 含义 |
+|--------|------|
+| `0` | 成功 |
+| `1` | 参数/用法错误 |
+| `2` | 连接失败（curl/请求类操作） |
+| `3` | 被中断/内部错误（端口占用、无权限等） |
+
+> 脚本可据此判断结果：如 `port-test -curl URL` 退出码 `2` 表示目标不可达。
 
 ### Port 模式
 
@@ -254,6 +278,8 @@ port-test -traceroute example.com -m 20 -w 2
 | `-json` | - | 自定义 JSON 响应 |
 | `-html` | - | HTML 文件路径 |
 | `-dir` | - | 静态文件目录 |
+| `-tls-cert` | - | HTTPS 证书路径（与 -tls-key 同时指定） |
+| `-tls-key` | - | HTTPS 私钥路径 |
 
 ### TCPing 模式
 

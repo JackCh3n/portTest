@@ -20,7 +20,7 @@ func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定目标地址")
 		fmt.Println("  用法: port-test -udp <host:port> [-timeout <sec>]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	// 复用 parseHostSegment 统一解析逻辑（正确处理 IPv6/IPv4/hostname + 端口）
@@ -44,7 +44,7 @@ func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 	if len(ports) == 0 {
 		fmt.Printf("  错误: 主机 %s 未指定端口\n", host)
 		fmt.Println("  用法: port-test -udp <host:port> [port2 ...]")
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	timeout := time.Duration(timeoutSec) * time.Second
