@@ -21,7 +21,12 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 		fmt.Println("  用法: port-test -dns <domain> [-type <A|AAAA|MX|CNAME|TXT|NS>]")
 		os.Exit(exitUsage)
 	}
-	domain := posArgs[0]
+	domain := strings.TrimSpace(posArgs[0])
+	if domain == "" {
+		fmt.Println("  错误: 请指定要查询的域名")
+		fmt.Println("  用法: port-test -dns <domain> [-type <A|AAAA|MX|CNAME|TXT|NS>]")
+		os.Exit(exitUsage)
+	}
 
 	// 构造 Resolver（支持自定义 DNS 服务器）
 	resolver := &net.Resolver{}
@@ -44,6 +49,13 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 	queryAll := dnsType == ""
 	if dnsType != "" {
 		dnsType = strings.ToUpper(dnsType)
+		// 校验记录类型, 避免无效值导致静默无输出
+		switch dnsType {
+		case "A", "AAAA", "MX", "CNAME", "TXT", "NS":
+		default:
+			fmt.Printf("  错误: 无效 DNS 记录类型 %q (支持: A/AAAA/MX/CNAME/TXT/NS)\n", dnsType)
+			os.Exit(exitUsage)
+		}
 	}
 
 	fmt.Printf("  域名: %s\n", domain)
@@ -108,6 +120,11 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 		cname, err := resolver.LookupCNAME(ctx, domain)
 		if err != nil {
 			return nil, err
+		}
+		cname = strings.TrimSuffix(cname, ".")
+		// 无 CNAME 记录时 LookupCNAME 返回域名本身, 视为无记录而非伪 CNAME
+		if cname == domain || cname == strings.TrimSuffix(domain, ".") {
+			return []string{}, nil
 		}
 		return []string{cname}, nil
 	})

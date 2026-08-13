@@ -37,6 +37,24 @@
             font-weight: bold;
         }
         .info { color: #888; font-size: 0.9em; }
+        .links {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .links a {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 8px;
+            background: #f0f0f0;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.85em;
+            transition: background 0.2s;
+        }
+        .links a:hover { background: #e0e0e0; }
     </style>
 </head>
 <body>
@@ -47,7 +65,12 @@
             <p>服务状态: <code>RUNNING</code></p>
             <p>时间: <span id="time"></span></p>
         </div>
-        <p class="info">此页面由 port-test 工具自动生成</p>
+        <div class="links">
+            <a href="/health">/health 健康检查</a>
+            <a href="/info">/info 服务信息</a>
+            <a href="/echo">/echo 请求回显</a>
+        </div>
+        <p class="info" style="margin-top: 16px;">此页面由 port-test 工具自动生成</p>
     </div>
     <script>
         document.getElementById('time').textContent = new Date().toLocaleString();

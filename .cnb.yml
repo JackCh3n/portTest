@@ -6,10 +6,10 @@
 #     （标签格式 v年_月日_时分，与 GitHub Actions 一致）→ 上传二进制附件
 # ============================================================
 
-# 公共配置：Go 构建环境
+# 公共配置：Go 构建环境（与 go.mod 的 go 1.25 保持一致）
 .go-env: &go-env
   docker:
-    image: golang:1.22
+    image: golang:1.25
 
 # push → 构建 + Release 的流水线模板
 .build-and-release: &build-and-release

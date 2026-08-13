@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,8 +142,23 @@ func scanTarget(target string, ports []int, timeout time.Duration) ScanResult {
 		}
 	}
 
+	// 按端口排序, 保证文本/JSON 输出顺序稳定（并发探测的完成顺序是不确定的）
+	sort.Slice(result.Results, func(i, j int) bool {
+		return result.Results[i].Port < result.Results[j].Port
+	})
+
 	result.TotalTime = time.Since(startTime)
 	return result
+}
+
+// resolveHost 校验目标主机可解析: IP 直接通过, 域名做一次 DNS 查询。
+// 用于扫描前快速失败, 避免全端口范围扫描时输出大量重复的 DNS 错误。
+func resolveHost(host string) error {
+	if net.ParseIP(host) != nil {
+		return nil
+	}
+	_, err := net.LookupIP(host)
+	return err
 }
 
 // pingPort 测试单个端口
@@ -274,6 +290,11 @@ func QuickPing(target string, ports []int, timeout time.Duration) (int, []PortRe
 			atomic.AddInt32(&successCount, 1)
 		}
 	}
+
+	// 按端口排序, 保证输出顺序稳定
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Port < results[j].Port
+	})
 
 	return int(atomic.LoadInt32(&successCount)), results
 }

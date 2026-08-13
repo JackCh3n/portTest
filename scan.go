@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -31,7 +32,16 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int, jsonOut boo
 		fmt.Println("  用法: port-test -scan <host> [-p <ports/range>] [-timeout <sec>]")
 		os.Exit(exitUsage)
 	}
-	host := posArgs[0]
+	host := strings.TrimSpace(posArgs[0])
+	if host == "" {
+		fmt.Println("  错误: 主机地址不能为空")
+		os.Exit(exitUsage)
+	}
+	// 提前解析主机, 避免全端口扫描时输出大量重复的 DNS 错误
+	if err := resolveHost(host); err != nil {
+		fmt.Printf("  错误: 无法解析主机 %s: %v\n", host, err)
+		os.Exit(exitConnFailed)
+	}
 
 	// 确定端口列表：-p 优先 + 位置参数补充
 	// 支持 "port-test -scan 10.0.0.1 -p 80 443" 空格分隔端口
@@ -109,6 +119,6 @@ func runScanMode(posArgs []string, flagPorts string, timeoutSec int, jsonOut boo
 		fmt.Println("    (未发现开放端口)")
 	}
 	fmt.Println("  ------------------------------------")
-	fmt.Printf("  已扫描: %d | 开放: %d | 耗时: %v\n",
-		result.Total, openCount, result.TotalTime.Round(time.Millisecond))
+	fmt.Printf("  已扫描: %d | 开放: %d | 关闭: %d | 耗时: %v\n",
+		result.Total, openCount, result.Total-openCount, result.TotalTime.Round(time.Millisecond))
 }

@@ -31,7 +31,7 @@ func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 		// 合并位置参数为一段，用 parseHostSegment 解析
 		joined := strings.Join(posArgs, " ")
 		ht := parseHostSegment(joined)
-		host = ht.Host
+		host = strings.TrimSpace(ht.Host)
 		ports = ht.Ports
 	}
 
@@ -40,6 +40,12 @@ func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 		ports = append(ports, parsePortRange(flagPorts)...)
 	}
 	ports = dedupePorts(ports)
+
+	if host == "" {
+		fmt.Println("  错误: 目标主机地址不能为空")
+		fmt.Println("  用法: port-test -udp <host:port> [port2 ...]")
+		os.Exit(exitUsage)
+	}
 
 	if len(ports) == 0 {
 		fmt.Printf("  错误: 主机 %s 未指定端口\n", host)

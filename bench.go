@@ -36,12 +36,15 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 
 	// 参数校验
 	if total <= 0 {
+		fmt.Println("  警告: 无效请求数, 使用默认 100")
 		total = 100
 	}
 	if concurrency <= 0 {
+		fmt.Println("  警告: 无效并发数, 使用默认 10")
 		concurrency = 10
 	}
 	if concurrency > total {
+		fmt.Printf("  提示: 并发数 %d 超过请求数, 调整为 %d\n", concurrency, total)
 		concurrency = total
 	}
 
@@ -55,6 +58,12 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 	}
 	method = strings.ToUpper(method)
 
+	// 提前校验请求模板（URL/方法非法时在并发启动前报错, 避免 worker goroutine 内 os.Exit）
+	if _, err := http.NewRequest(method, url, nil); err != nil {
+		fmt.Printf("  请求构造失败: %v\n", err)
+		os.Exit(exitUsage)
+	}
+
 	// 构建请求模板
 	newReq := func() *http.Request {
 		var body io.Reader
@@ -63,8 +72,8 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 		}
 		req, err := http.NewRequest(method, url, body)
 		if err != nil {
-			fmt.Printf("  请求构造失败: %v\n", err)
-			os.Exit(exitUsage)
+			// 模板已在启动前校验通过, 此处不应失败; 返回 nil 由调用方跳过
+			return nil
 		}
 		for _, h := range headers {
 			h = strings.TrimSpace(h)
@@ -86,8 +95,10 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 		return req
 	}
 
-	// HTTP 客户端（支持忽略证书、跟随重定向、keep-alive 开关）
-	transport := &http.Transport{}
+	// HTTP 客户端（支持忽略证书、跟随重定向、keep-alive 开关、读取环境代理）
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
 	if insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
@@ -148,6 +159,10 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 			defer wg.Done()
 			for range jobs {
 				req := newReq()
+				if req == nil {
+					atomic.AddInt64(&failed, 1)
+					continue
+				}
 				reqStart := time.Now()
 				resp, err := client.Do(req)
 				latency := time.Since(reqStart)

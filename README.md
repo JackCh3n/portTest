@@ -89,6 +89,9 @@ port-test -tcping -ip 10.0.0.1 -p 80 443 3306
 # 指定超时和重复次数
 port-test -tcping -ip 10.0.0.1 -p 22,80 -timeout 5 -count 3 -interval 2
 
+# 混合写法（-p 补充的端口会应用到所有主机）
+port-test -tcping 10.0.0.1:8080 -p 9090
+
 # JSON 输出（脚本解析）
 port-test -tcping 10.0.0.1:80,443 -json-out
 ```
@@ -260,7 +263,7 @@ port-test -traceroute example.com -m 20 -w 2
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-timeout` | `3` | 连接超时（秒，tcping/curl/scan/udp/traceroute） |
+| `-timeout` | `3` | 连接超时（秒，tcping/curl/scan/udp；traceroute 使用 `-w`） |
 | `-json-out` | `false` | JSON 输出（tcping/scan），便于脚本解析 |
 | `-version` | - | 显示版本信息 |
 
@@ -270,7 +273,7 @@ port-test -traceroute example.com -m 20 -w 2
 |--------|------|
 | `0` | 成功 |
 | `1` | 参数/用法错误 |
-| `2` | 连接失败（curl/请求类操作） |
+| `2` | 连接失败（curl 请求失败、scan/tcping 目标无法解析） |
 | `3` | 被中断/内部错误（端口占用、无权限等） |
 
 > 脚本可据此判断结果：如 `port-test -curl URL` 退出码 `2` 表示目标不可达。
@@ -319,7 +322,7 @@ port-test -traceroute example.com -m 20 -w 2
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-type` | 全部 | 记录类型：A/AAAA/MX/CNAME/TXT/NS |
+| `-type` | 全部 | 记录类型：A/AAAA/MX/CNAME/TXT/NS（其他值报错） |
 | `-ip` | 系统默认 | DNS 服务器地址（支持 `8.8.8.8:5353` 自定义端口） |
 
 ### TRACEROUTE 模式

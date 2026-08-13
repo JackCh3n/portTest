@@ -106,8 +106,10 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	}
 	fmt.Println("  ------------------------------------")
 
-	// HTTP 客户端：支持忽略 HTTPS 证书、跟随重定向
-	transport := &http.Transport{}
+	// HTTP 客户端：支持忽略 HTTPS 证书、跟随重定向、读取环境代理 (HTTP_PROXY/HTTPS_PROXY/NO_PROXY)
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
 	if insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}

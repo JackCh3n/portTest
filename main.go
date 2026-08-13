@@ -127,7 +127,7 @@ func printUsage() {
 	fmt.Println("    port-test -traceroute example.com -m 20 -w 2     最大20跳/超时2秒")
 	fmt.Println()
 	fmt.Println("  全局选项:")
-	fmt.Println("    -timeout <sec>    连接超时时间 (tcping/curl/scan/udp/traceroute, 默认: 3)")
+	fmt.Println("    -timeout <sec>    连接超时时间 (tcping/curl/scan/udp, 默认: 3)")
 	fmt.Println("    -json-out         JSON 输出 (tcping/scan, 便于脚本解析)")
 	fmt.Println("    -count <num>      测试次数 (tcping, 默认: 1)")
 	fmt.Println("    -interval <sec>   重试间隔秒 (tcping, 默认: 1)")
@@ -143,13 +143,18 @@ func printUsage() {
 	fmt.Println("    -ip <host>        目标地址 (tcping) 或 DNS 服务器 (dns)")
 	fmt.Println("    -T                TCP 模式 (traceroute)")
 	fmt.Println("    -m <num>          最大跳数 (traceroute, 默认: 30)")
-	fmt.Println("    -w <sec>          每跳超时 (traceroute, 默认: 1)")
+	fmt.Println("    -w <sec>          每跳超时 (traceroute, 默认: 1, 该模式不使用 -timeout)")
 	fmt.Println("    -version          显示版本信息")
 	fmt.Println("  退出码: 0=成功 1=参数错误 2=连接失败 3=内部错误")
 	fmt.Println()
 }
 
 func main() {
+	// 接管 flag 解析: ContinueOnError 使 -h/--help 显示中文帮助并退出 0,
+	// 参数错误按文档退出码 1 (flag 包默认行为是打印英文帮助并以 2 退出)
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flag.CommandLine.Usage = printUsage
+
 	// 解析命令行参数
 	portStr := flag.String("p", "", "端口号，多个端口用逗号分隔")
 	code := flag.Int("code", 200, "HTTP 状态码")
@@ -198,7 +203,14 @@ func main() {
 	trWait := flag.Int("w", 1, "每跳超时秒 (traceroute, 默认: 1)")
 
 	showVersion := flag.Bool("version", false, "显示版本信息")
-	flag.Parse()
+	// 解析失败: -h/--help 属于正常帮助请求退出 0, 其余按文档语义退出 1
+	// (ContinueOnError 模式下需调用 CommandLine.Parse 才能拿到错误)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		if err == flag.ErrHelp {
+			os.Exit(0)
+		}
+		os.Exit(exitUsage)
+	}
 
 	// 获取位置参数（flag 解析后剩余的非 flag 参数）
 	posArgs := flag.Args()
@@ -246,6 +258,20 @@ func main() {
 	if *showVersion {
 		printHeader()
 		os.Exit(0)
+	}
+
+	// 全局参数校验: 负值/零值回退到默认, 避免 timeout=0 在 curl/bench 中变成无限等待
+	if *timeout <= 0 {
+		fmt.Println("  警告: 无效超时值, 使用默认 3 秒")
+		*timeout = 3
+	}
+	if *count <= 0 {
+		fmt.Println("  警告: 无效测试次数, 使用默认 1 次")
+		*count = 1
+	}
+	if *interval < 0 {
+		fmt.Println("  警告: 无效重试间隔, 使用默认 0 秒")
+		*interval = 0
 	}
 
 	// 无任何模式开关且无位置参数时显示帮助
@@ -301,8 +327,14 @@ func main() {
 		printHeader()
 		// traceroute 端口从 -p 解析（与 scan/tcping 共用）
 		trPort := 0
-		if p, err := strconv.Atoi(strings.TrimSpace(*portStr)); err == nil {
-			trPort = p
+		if *portStr != "" {
+			parsed := parsePortRange(*portStr)
+			if len(parsed) > 0 {
+				trPort = parsed[0]
+				if len(parsed) > 1 {
+					fmt.Printf("  警告: traceroute 仅支持单个端口, 使用第一个: %d\n", trPort)
+				}
+			}
 		}
 		runTracerouteMode(posArgs, *trTcp, trPort, *trMaxHops, *trWait)
 
@@ -351,9 +383,15 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 				continue
 			}
 			ht := parseHostSegment(seg)
-			if ht.Host != "" {
-				targets = append(targets, ht)
+			if ht.Host == "" {
+				fmt.Printf("  警告: 忽略无效目标段: %q\n", seg)
+				continue
 			}
+			// -p 补充的端口同样生效（应用到所有主机, 与 -ip 传统写法行为一致）
+			if flagPorts != "" {
+				ht.Ports = append(ht.Ports, parsePortRange(flagPorts)...)
+			}
+			targets = append(targets, ht)
 		}
 	}
 
@@ -371,6 +409,11 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 		}
 		// 去除重复端口
 		targets[i].Ports = dedupePorts(targets[i].Ports)
+		// 提前校验主机可解析, 避免全端口范围时输出大量重复的 DNS 错误
+		if err := resolveHost(targets[i].Host); err != nil {
+			fmt.Printf("  错误: 无法解析主机 %s: %v\n", targets[i].Host, err)
+			os.Exit(exitConnFailed)
+		}
 	}
 
 	MultiTcpingMode(targets, time.Duration(timeoutSec)*time.Second, count, time.Duration(intervalSec)*time.Second, jsonOut)
@@ -534,7 +577,8 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	if config.JSON != "" {
 		jsonContent = []byte(config.JSON)
 	} else {
-		resp := JSONResponse{Code: 200, Msg: "hello"}
+		// 默认响应的 code 字段与 HTTP 状态码保持一致（此前硬编码 200, 指定 -code 时 body 与状态码不一致）
+		resp := JSONResponse{Code: config.Code, Msg: "hello"}
 		data, _ := json.Marshal(resp)
 		jsonContent = data
 	}
