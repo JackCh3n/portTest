@@ -270,7 +270,7 @@ func main() {
 		*count = 1
 	}
 	if *interval < 0 {
-		fmt.Println("  警告: 无效重试间隔, 使用默认 0 秒")
+		fmt.Println("  警告: 无效重试间隔(应为非负), 已调整为 0 秒")
 		*interval = 0
 	}
 
@@ -455,7 +455,8 @@ func parseHostSegment(seg string) HostTarget {
 				ht.Ports = append(ht.Ports, parsePortRange(portStr)...)
 			}
 		} else {
-			ht.Host = first
+			// 只有左括号没有右括号（如 "[::1"）: 去掉左括号按纯 IPv6 处理
+			ht.Host = strings.TrimPrefix(first, "[")
 		}
 	} else if strings.Count(first, ":") >= 2 {
 		// 纯 IPv6 地址（至少 2 个冒号），如 ::1 或 2001:db8::1

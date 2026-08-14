@@ -164,4 +164,7 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	fmt.Println("  ------------------------------------")
 	fmt.Println("  响应体:")
 	fmt.Println(string(respBody))
+	if len(respBody) >= 10*1024*1024 {
+		fmt.Println("  (响应体达到 10MB 上限, 已截断)")
+	}
 }

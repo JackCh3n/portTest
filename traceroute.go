@@ -27,15 +27,21 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	}
 	target := posArgs[0]
 
-	// 解析目标 IP
+	// 解析目标 IP: 优先选择 IPv4 地址（当前仅支持 IPv4 traceroute）
 	ips, err := net.LookupIP(target)
 	if err != nil || len(ips) == 0 {
 		fmt.Printf("  错误: 无法解析目标: %s\n", target)
 		os.Exit(exitUsage)
 	}
-	dst := ips[0]
-	if dst.To4() == nil {
-		fmt.Println("  错误: 暂不支持 IPv6 traceroute")
+	var dst net.IP
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			dst = ip
+			break
+		}
+	}
+	if dst == nil {
+		fmt.Println("  错误: 暂不支持 IPv6 traceroute (目标仅有 AAAA 记录)")
 		os.Exit(exitUsage)
 	}
 

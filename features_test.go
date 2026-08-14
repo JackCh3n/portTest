@@ -359,3 +359,80 @@ func TestPortRangeSinglePort(t *testing.T) {
 		t.Errorf("parsePortRange(0) = %v, want empty", ports)
 	}
 }
+
+// TestParseHostSegmentLoneBracket 验证只有左括号的 IPv6 也能解析
+func TestParseHostSegmentLoneBracket(t *testing.T) {
+	ht := parseHostSegment("[::1 53")
+	if ht.Host != "::1" {
+		t.Errorf("parseHostSegment(\"[::1 53\").Host = %q, want ::1", ht.Host)
+	}
+	if len(ht.Ports) != 1 || ht.Ports[0] != 53 {
+		t.Errorf("parseHostSegment(\"[::1 53\").Ports = %v, want [53]", ht.Ports)
+	}
+}
+
+// TestSplitMultiHostMoreSeps 验证 "=" 与 "?" 分隔符
+func TestSplitMultiHostMoreSeps(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"10.0.0.1:80=10.0.0.2:443", []string{"10.0.0.1:80", "10.0.0.2:443"}},
+		{"10.0.0.1:80?10.0.0.2:443", []string{"10.0.0.1:80", "10.0.0.2:443"}},
+		{"10.0.0.1:80+10.0.0.2:443\\10.0.0.3:53", []string{"10.0.0.1:80", "10.0.0.2:443", "10.0.0.3:53"}},
+	}
+	for _, tt := range tests {
+		got := splitMultiHost(tt.input)
+		if len(got) != len(tt.expected) {
+			t.Errorf("splitMultiHost(%q) = %v, want %v", tt.input, got, tt.expected)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.expected[i] {
+				t.Errorf("splitMultiHost(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.expected[i])
+			}
+		}
+	}
+}
+
+// TestExtractTrailingFlagsXDH 验证 curl 风格后置 -X/-d/-H 回收
+func TestExtractTrailingFlagsXDH(t *testing.T) {
+	var method, data string
+	var headers headerList
+	rest := extractTrailingFlags([]string{"http://x.com", "-X", "POST", "-d", "a=1&b=2", "-H", "X-Test: 1", "-H", "X-Two: 2"},
+		&flagOpts{method: &method, data: &data, headers: &headers})
+
+	if len(rest) != 1 || rest[0] != "http://x.com" {
+		t.Errorf("rest = %v, want [http://x.com]", rest)
+	}
+	if method != "POST" {
+		t.Errorf("method = %q, want POST", method)
+	}
+	if data != "a=1&b=2" {
+		t.Errorf("data = %q, want a=1&b=2", data)
+	}
+	if len(headers) != 2 || headers[0] != "X-Test: 1" || headers[1] != "X-Two: 2" {
+		t.Errorf("headers = %v, want [X-Test: 1 X-Two: 2]", headers)
+	}
+}
+
+// TestScanResultsSorted 验证 scanTarget 结果按端口升序
+func TestScanResultsSorted(t *testing.T) {
+	// 本地启动服务提供开放端口
+	ports := []int{18121, 18120, 18122, 1}
+	result := scanTarget("127.0.0.1", ports, 500*time.Millisecond)
+
+	if result.Total != len(ports) {
+		t.Fatalf("Total = %d, want %d", result.Total, len(ports))
+	}
+	for i := 1; i < len(result.Results); i++ {
+		if result.Results[i-1].Port > result.Results[i].Port {
+			t.Errorf("结果未按端口排序: %v", result.Results)
+			break
+		}
+	}
+	// 首个结果应为最小端口 1
+	if result.Results[0].Port != 1 {
+		t.Errorf("Results[0].Port = %d, want 1 (最小端口排最前)", result.Results[0].Port)
+	}
+}

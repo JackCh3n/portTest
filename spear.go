@@ -41,6 +41,10 @@ type HostTarget struct {
 // MultiTcpingMode 多主机 TCPing 测试
 func MultiTcpingMode(targets []HostTarget, timeout time.Duration, count int, interval time.Duration, jsonOut bool) {
 	if jsonOut {
+		// JSON 输出模式为单次快照, 不重复 -count/-interval, 避免静默忽略造成误解
+		if count > 1 {
+			fmt.Println("  警告: JSON 输出模式为单次探测, -count/-interval 不生效")
+		}
 		// JSON 输出模式：收集所有主机结果一次性输出
 		type targetResult struct {
 			Target  string       `json:"target"`
