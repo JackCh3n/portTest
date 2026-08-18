@@ -70,13 +70,14 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	fmt.Println("  ------------------------------------")
 
 	// 监听 ICMP 响应（Time Exceeded / Port Unreachable）
-	icmpConn, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
+	// Windows 需设置 SIO_RCVALL + bind 出口 IP 才能收到 ICMP 错误消息
+	icmpPC, err := listenIcmp(dst)
 	if err != nil {
 		fmt.Printf("  错误: 无法监听 ICMP (需要管理员/root 权限): %v\n", err)
+		fmt.Println("  提示: Windows 请以管理员运行; 若仍失败请检查防火墙是否放行 ICMP 入站")
 		os.Exit(exitInterrupted)
 	}
-	defer icmpConn.Close()
-	icmpPC := ipv4.NewPacketConn(icmpConn)
+	defer icmpPC.Close()
 
 	// 逐跳探测
 	timeout := time.Duration(timeoutSec) * time.Second
