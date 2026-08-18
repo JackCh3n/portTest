@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -82,6 +83,7 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	// 逐跳探测
 	timeout := time.Duration(timeoutSec) * time.Second
 	startTime := time.Now()
+	noResponseHops := 0 // 无响应跳数(用于 Windows 限制提示)
 
 	for ttl := 1; ttl <= maxHops; ttl++ {
 		// 本跳探测 3 次
@@ -120,6 +122,7 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 
 		// 输出本跳
 		if hopIP == "" {
+			noResponseHops++
 			fmt.Printf("  %2d  * * * (无响应)\n", ttl)
 		} else {
 			var rtts string
@@ -140,6 +143,13 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 
 	fmt.Println("  ------------------------------------")
 	fmt.Printf("  总耗时: %v\n", time.Since(startTime).Round(time.Millisecond))
+
+	// Windows 限制提示: raw socket 收不到 ICMP 错误消息, 中间跳无法显示
+	if runtime.GOOS == "windows" && noResponseHops > 0 {
+		fmt.Println()
+		fmt.Println("  提示: Windows 系统过滤了 ICMP Time Exceeded 消息, 中间路由器无法显示。")
+		fmt.Println("  完整路由建议: ① 在 Linux/macOS 上运行本工具 ② 或 Windows 安装 Npcap 后使用 tracetcp")
+	}
 }
 
 // parseIcmpType 从 raw ICMP socket 读取的数据中提取 ICMP 类型

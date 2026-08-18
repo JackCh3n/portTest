@@ -217,6 +217,10 @@ port-test -traceroute example.com -m 20 -w 2
 
 > ⚠️ 需要管理员/root 权限（监听 ICMP）。Windows 需以管理员运行，Linux 需 root 或 `sudo`。
 
+> ⚠️ **Windows 限制**：Windows Vista 及以上系统过滤 ICMP 错误消息（Time Exceeded），
+> raw socket 收不到中间路由器响应，**Windows 上无法显示中间跳**（只会显示 `* * *` 直到到达目标）。
+> 完整路由追踪请在 **Linux/macOS** 上运行，或 Windows 安装 [Npcap](https://npcap.com/) 后使用 tracetcp。
+
 ## 分隔符
 
 ### 端口分隔符
