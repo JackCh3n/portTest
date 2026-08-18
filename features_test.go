@@ -436,3 +436,47 @@ func TestScanResultsSorted(t *testing.T) {
 		t.Errorf("Results[0].Port = %d, want 1 (最小端口排最前)", result.Results[0].Port)
 	}
 }
+
+// TestParseIcmpType 验证 ICMP 类型跨平台解析
+// Windows raw socket 数据含 IPv4 头, Linux/macOS 不含, 应都能正确提取
+func TestParseIcmpType(t *testing.T) {
+	// 构造 Windows 格式: 20 字节 IPv4 头 (0x45) + ICMP 消息
+	winBuf := func(icmpType byte) []byte {
+		ipHeader := make([]byte, 20)
+		ipHeader[0] = 0x45 // IPv4 version=4, IHL=5 (20 字节)
+		ipHeader[2] = 0x00 // total length 高字节
+		ipHeader[3] = 0x15 // total length 低字节 (21)
+		ipHeader[8] = 64   // TTL
+		return append(ipHeader, icmpType)
+	}
+	// 只有 IP 头 (0x45 开头) 无 ICMP payload
+	ipHeaderOnly := make([]byte, 20)
+	ipHeaderOnly[0] = 0x45
+
+	tests := []struct {
+		name     string
+		buf      []byte
+		wantType byte
+		wantOK   bool
+	}{
+		// Linux/macOS: 无 IP 头, 数据从 ICMP 开始
+		{"linux time exceeded", []byte{11, 0, 0, 0}, 11, true},
+		{"linux dest unreachable", []byte{3, 0, 0, 0}, 3, true},
+		{"linux echo reply", []byte{0, 0, 0, 0}, 0, true},
+		// Windows: 含 IPv4 头 (0x45, IHL=5), ICMP 从偏移 20 开始
+		{"windows time exceeded", winBuf(11), 11, true},
+		{"windows dest unreachable", winBuf(3), 3, true},
+		{"windows echo reply", winBuf(0), 0, true},
+		// 边界
+		{"empty buffer", nil, 0, false},
+		{"ip header only no icmp", ipHeaderOnly, 0, false},
+	}
+
+	for _, tt := range tests {
+		gotType, gotOK := parseIcmpType(tt.buf)
+		if gotOK != tt.wantOK || (gotOK && gotType != tt.wantType) {
+			t.Errorf("%s: parseIcmpType = (%d, %v), want (%d, %v)",
+				tt.name, gotType, gotOK, tt.wantType, tt.wantOK)
+		}
+	}
+}
