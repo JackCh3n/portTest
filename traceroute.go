@@ -152,26 +152,59 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	}
 }
 
-// parseIcmpType 从 raw ICMP socket 读取的数据中提取 ICMP 类型
+// parseIcmpTypeCode 从 raw ICMP socket 读取的数据中提取 ICMP 类型和代码
 // 跨平台差异: Windows raw socket 接收的数据包含 IPv4 头（数据从 IP 头开始），
 // Linux/macOS 未设置 IP_HDRINCL 时数据从 ICMP 头开始。
 // 通过检测首字节是否为 IPv4 version(4) 自动跳过 IP 头, 两个平台通用。
-func parseIcmpType(buf []byte) (byte, bool) {
+// 返回 (类型, 代码, 是否有效)
+func parseIcmpTypeCode(buf []byte) (byte, byte, bool) {
 	if len(buf) == 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	offset := 0
 	if buf[0]>>4 == 4 {
 		// IPv4 header: IHL(低4位) 表示 32 位字数, 最小 5 (20 字节)
 		ihl := int(buf[0]&0x0f) * 4
-		if ihl >= 20 && ihl < len(buf) {
-			offset = ihl
-		} else if ihl >= 20 {
+		if ihl < 20 {
+			return 0, 0, false
+		}
+		if ihl >= len(buf) {
 			// 检测到 IP 头但数据不足（无 ICMP payload），丢弃
+			return 0, 0, false
+		}
+		offset = ihl
+	}
+	if len(buf) <= offset+1 {
+		return 0, 0, false
+	}
+	return buf[offset], buf[offset+1], true
+}
+
+// parseIcmpTriggerPort 从 ICMP 错误消息中提取触发包的目的端口
+// 用于确认 ICMP 属于当前探测（防止无关/陈旧 ICMP 干扰路由显示）。
+// 数据布局: [可选外层IP头] ICMP头(8字节) 原始IP头 原始TCP/UDP头
+// TCP/UDP 头前 4 字节均为 源端口(2) + 目的端口(2), 故两种协议通用。
+// 返回 (目的端口, 是否解析成功)
+func parseIcmpTriggerPort(buf []byte) (int, bool) {
+	off := 0
+	if len(buf) > 0 && buf[0]>>4 == 4 {
+		ihl := int(buf[0]&0x0f) * 4
+		if ihl < 20 || len(buf) <= ihl {
 			return 0, false
 		}
+		off = ihl
 	}
-	return buf[offset], true
+	// ICMP 头 8 字节
+	inner := off + 8
+	if len(buf) < inner+20 || buf[inner]>>4 != 4 {
+		return 0, false
+	}
+	ihl := int(buf[inner]&0x0f) * 4
+	if ihl < 20 || len(buf) < inner+ihl+4 {
+		return 0, false
+	}
+	tcp := inner + ihl
+	return int(buf[tcp+2])<<8 | int(buf[tcp+3]), true
 }
 
 // sendProbe 发送一个 UDP TTL 探测包并等待 ICMP 响应
@@ -215,20 +248,27 @@ func sendProbe(pc *ipv4.PacketConn, dst net.IP, ttl int, port int, timeout time.
 			continue
 		}
 
-		// ICMP 类型: 11=Time Exceeded(中间跳), 3=Destination Unreachable(到达目标), 0/8=Echo
-		// 注意: Windows raw socket 数据含 IP 头, 需用 parseIcmpType 提取
-		msgType, ok := parseIcmpType(buf)
+		// ICMP 类型: 11=Time Exceeded(中间跳), 3=Destination Unreachable,
+		// 3且code=3=端口不可达(到达目标端口关闭), 0/8=Echo
+		// 注意: Windows raw socket 数据含 IP 头, 需用 parseIcmpTypeCode 提取
+		msgType, msgCode, ok := parseIcmpTypeCode(buf[:n])
 		if !ok {
+			continue
+		}
+		// 校验触发包目的端口 == 探测端口（防止无关 ICMP 干扰）
+		if tp, tok := parseIcmpTriggerPort(buf[:n]); tok && tp != port {
 			continue
 		}
 		src := cm.Src.String()
 
-		switch msgType {
-		case 11:
+		switch {
+		case msgType == 11:
 			return src, false, time.Since(start)
-		case 3:
+		case msgType == 3 && msgCode == 3:
 			return src, true, time.Since(start)
-		case 0, 8:
+		case msgType == 3:
+			return src, false, time.Since(start)
+		case msgType == 0 || msgType == 8:
 			return src, true, time.Since(start)
 		}
 	}
@@ -238,6 +278,11 @@ func sendProbe(pc *ipv4.PacketConn, dst net.IP, ttl int, port int, timeout time.
 // TCP traceroute 原理: 通过 Dialer.Control 在 SYN 发出前设置 IP_TTL，
 // 中间路由器 TTL 过期时返回 ICMP Time Exceeded（由共享 ICMP 监听器捕获），
 // 目标收到 SYN 后返回 SYN-ACK（连接成功）或 RST（连接拒绝），均表示到达目标。
+//
+// 关键点（Linux 行为）: 内核收到 Time Exceeded 后, 除了投递给 raw socket,
+// 还会把 EHOSTUNREACH 注入到进行中的 connect()。因此 connect 可能快速返回
+// 该错误, 此时不能立即判定"超时"——必须继续等待 raw socket 的 ICMP 直到
+// deadline, 否则中间路由器的 Time Exceeded 会被竞态丢掉, 显示为无响应。
 // 返回: 响应来源 IP, 是否到达目标, 往返时间
 func sendTcpProbe(pc *ipv4.PacketConn, dst net.IP, ttl, port int, timeout time.Duration) (string, bool, time.Duration) {
 	start := time.Now()
@@ -262,7 +307,7 @@ func sendTcpProbe(pc *ipv4.PacketConn, dst net.IP, ttl, port int, timeout time.D
 		},
 	}
 
-	// 异步发起 TCP 连接
+	// 异步发起 TCP 连接（connect 返回前内核可能已把 ICMP 错误注入 socket）
 	tcpCh := make(chan error, 1)
 	go func() {
 		conn, err := dialer.Dial("tcp", addr)
@@ -272,65 +317,94 @@ func sendTcpProbe(pc *ipv4.PacketConn, dst net.IP, ttl, port int, timeout time.D
 		tcpCh <- err
 	}()
 
-	// ICMP 消息结构
+	// ICMP 消息
 	type icmpMsg struct {
 		ip      string
 		msgType byte
+		msgCode byte
 		ok      bool
 	}
 
-	for {
-		// 单次 ICMP 读取: 每次探测只启动一个 reader,
-		// 结束前必须唤醒并等待其退出, 避免旧 reader 抢走下次探测的 ICMP 响应
-		icmpCh := make(chan icmpMsg, 1)
-		readerDone := make(chan struct{})
+	// 启动 ICMP reader: 读取一个包后退出。
+	// 注意: 截止时间在启动 reader 前设置, 避免 reader 内部的
+	// SetReadDeadline 与 stopReader 的唤醒互相覆盖造成竞态。
+	startReader := func() (<-chan icmpMsg, <-chan struct{}) {
+		ch := make(chan icmpMsg, 1)
+		done := make(chan struct{})
+		pc.SetReadDeadline(deadline)
 		go func() {
-			defer close(readerDone)
+			defer close(done)
 			buf := make([]byte, 1500)
-			pc.SetReadDeadline(deadline)
 			n, cm, _, err := pc.ReadFrom(buf)
 			if err != nil || n == 0 || cm == nil || cm.Src == nil {
-				icmpCh <- icmpMsg{}
+				ch <- icmpMsg{}
 				return
 			}
-			mt, ok := parseIcmpType(buf)
-			icmpCh <- icmpMsg{cm.Src.String(), mt, ok}
+			mt, mc, ok := parseIcmpTypeCode(buf[:n])
+			if ok {
+				// 校验触发包目的端口 == 探测端口（防止无关 ICMP 干扰）
+				if tp, tok := parseIcmpTriggerPort(buf[:n]); tok && tp != port {
+					ok = false
+				}
+			}
+			ch <- icmpMsg{cm.Src.String(), mt, mc, ok}
 		}()
+		return ch, done
+	}
 
-		// 唤醒 ICMP reader 并等待退出（保证探测间串行，不抢占下个探测的包）
-		stopReader := func() {
-			pc.SetReadDeadline(time.Now())
-			<-readerDone
+	var (
+		icmpCh     <-chan icmpMsg
+		readerDone <-chan struct{}
+	)
+	icmpCh, readerDone = startReader()
+
+	// 唤醒 ICMP reader 并等待退出（保证探测间串行, 不抢占下个探测的包）
+	stopReader := func() {
+		pc.SetReadDeadline(time.Now())
+		<-readerDone
+	}
+
+	tcpDone := false // connect 已返回（成功/拒绝/超时/错误）
+	for {
+		var tcpSel <-chan error
+		if !tcpDone {
+			tcpSel = tcpCh
 		}
 
 		select {
 		case msg := <-icmpCh:
 			if msg.ok {
-				switch msg.msgType {
-				case 11: // Time Exceeded — 中间路由器
-					stopReader()
+				switch {
+				case msg.msgType == 11: // Time Exceeded — 中间路由器
 					return msg.ip, false, time.Since(start)
-				case 3: // Destination Unreachable — 到达目标（或不可达）
-					stopReader()
+				case msg.msgType == 3 && msg.msgCode == 3: // 端口不可达 — 到达目标
+					return msg.ip, true, time.Since(start)
+				case msg.msgType == 3: // 网络/主机不可达 — 视为中间跳
+					return msg.ip, false, time.Since(start)
+				case msg.msgType == 0 || msg.msgType == 8: // Echo
 					return msg.ip, true, time.Since(start)
 				}
 			}
-			// 无关 ICMP 包或读取失败: 唤醒 reader 后重新读取
-			stopReader()
+			// 无关 ICMP / 未知类型 / 读取失败: 重启 reader 继续等待
+			if time.Now().After(deadline) {
+				return "", false, time.Since(start)
+			}
+			icmpCh, readerDone = startReader()
 
-		case err := <-tcpCh:
-			// TCP 结果已到, 唤醒 ICMP reader 后返回
-			stopReader()
+		case err := <-tcpSel:
+			tcpDone = true
 			if err == nil {
 				// 连接成功 — 到达目标，端口开放
+				stopReader()
 				return dst.String(), true, time.Since(start)
 			}
 			if isConnectionRefused(err) {
 				// 连接被拒绝（RST）— 到达目标，端口关闭
+				stopReader()
 				return dst.String(), true, time.Since(start)
 			}
-			// 超时或其他错误 — 无法确认
-			return "", false, time.Since(start)
+			// 其他错误(EHOSTUNREACH/ETIMEDOUT 等, 常见于 TTL 过期):
+			// 不立即返回, 继续等待 ICMP Time Exceeded 直到 deadline
 
 		case <-time.After(time.Until(deadline)):
 			stopReader()
@@ -340,10 +414,25 @@ func sendTcpProbe(pc *ipv4.PacketConn, dst net.IP, ttl, port int, timeout time.D
 }
 
 // isConnectionRefused 判断错误是否为连接被拒绝（TCP RST）
-// 跨平台: Linux ECONNREFUSED=111, macOS=61, Windows WSAECONNREFUSED=1226
+// 跨平台:
+//   - Linux: ECONNREFUSED=111
+//   - macOS: ECONNREFUSED=61
+//   - Windows: WSAECONNREFUSED=10061
+// 注意: 不能只用 errors.Is(err, syscall.ECONNREFUSED)——Go 的 syscall 包在
+// Windows 上把该常量定义为 POSIX 语义别名(数值 ≠ 10061), errors.Is 会失败。
+// 需额外用 errors.As 提取 Errno 数值按平台匹配。
 func isConnectionRefused(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, syscall.ECONNREFUSED)
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		if runtime.GOOS == "windows" && uintptr(errno) == 10061 {
+			return true // WSAECONNREFUSED
+		}
+	}
+	return false
 }

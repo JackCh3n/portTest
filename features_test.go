@@ -437,17 +437,17 @@ func TestScanResultsSorted(t *testing.T) {
 	}
 }
 
-// TestParseIcmpType 验证 ICMP 类型跨平台解析
+// TestParseIcmpType 验证 ICMP 类型/代码跨平台解析
 // Windows raw socket 数据含 IPv4 头, Linux/macOS 不含, 应都能正确提取
 func TestParseIcmpType(t *testing.T) {
 	// 构造 Windows 格式: 20 字节 IPv4 头 (0x45) + ICMP 消息
-	winBuf := func(icmpType byte) []byte {
+	winBuf := func(icmpType, icmpCode byte) []byte {
 		ipHeader := make([]byte, 20)
 		ipHeader[0] = 0x45 // IPv4 version=4, IHL=5 (20 字节)
 		ipHeader[2] = 0x00 // total length 高字节
-		ipHeader[3] = 0x15 // total length 低字节 (21)
+		ipHeader[3] = 0x17 // total length 低字节 (23)
 		ipHeader[8] = 64   // TTL
-		return append(ipHeader, icmpType)
+		return append(ipHeader, icmpType, icmpCode)
 	}
 	// 只有 IP 头 (0x45 开头) 无 ICMP payload
 	ipHeaderOnly := make([]byte, 20)
@@ -457,26 +457,81 @@ func TestParseIcmpType(t *testing.T) {
 		name     string
 		buf      []byte
 		wantType byte
+		wantCode byte
 		wantOK   bool
 	}{
 		// Linux/macOS: 无 IP 头, 数据从 ICMP 开始
-		{"linux time exceeded", []byte{11, 0, 0, 0}, 11, true},
-		{"linux dest unreachable", []byte{3, 0, 0, 0}, 3, true},
-		{"linux echo reply", []byte{0, 0, 0, 0}, 0, true},
+		{"linux time exceeded", []byte{11, 0, 0, 0}, 11, 0, true},
+		{"linux dest unreachable", []byte{3, 3, 0, 0}, 3, 3, true},
+		{"linux echo reply", []byte{0, 0, 0, 0}, 0, 0, true},
 		// Windows: 含 IPv4 头 (0x45, IHL=5), ICMP 从偏移 20 开始
-		{"windows time exceeded", winBuf(11), 11, true},
-		{"windows dest unreachable", winBuf(3), 3, true},
-		{"windows echo reply", winBuf(0), 0, true},
+		{"windows time exceeded", winBuf(11, 0), 11, 0, true},
+		{"windows dest unreachable", winBuf(3, 3), 3, 3, true},
+		{"windows echo reply", winBuf(0, 0), 0, 0, true},
 		// 边界
-		{"empty buffer", nil, 0, false},
-		{"ip header only no icmp", ipHeaderOnly, 0, false},
+		{"empty buffer", nil, 0, 0, false},
+		{"ip header only no icmp", ipHeaderOnly, 0, 0, false},
 	}
 
 	for _, tt := range tests {
-		gotType, gotOK := parseIcmpType(tt.buf)
-		if gotOK != tt.wantOK || (gotOK && gotType != tt.wantType) {
-			t.Errorf("%s: parseIcmpType = (%d, %v), want (%d, %v)",
-				tt.name, gotType, gotOK, tt.wantType, tt.wantOK)
+		gotType, gotCode, gotOK := parseIcmpTypeCode(tt.buf)
+		if gotOK != tt.wantOK || (gotOK && (gotType != tt.wantType || gotCode != tt.wantCode)) {
+			t.Errorf("%s: parseIcmpTypeCode = (%d, %d, %v), want (%d, %d, %v)",
+				tt.name, gotType, gotCode, gotOK, tt.wantType, tt.wantCode, tt.wantOK)
+		}
+	}
+}
+
+// TestParseIcmpTriggerPort 验证 ICMP 错误消息中触发包目的端口提取
+// 布局: [可选外层IP头] ICMP头(8) + 原始IP头(20) + 原始TCP/UDP头(8)
+// TCP/UDP 头: 源端口(2) + 目的端口(2) + ...
+func TestParseIcmpTriggerPort(t *testing.T) {
+	// 构造 ICMP Time Exceeded (type=11) 消息
+	makeIcmp := func(includeOuterIP bool, srcPort, dstPort int) []byte {
+		inner := make([]byte, 0, 36)
+		// 原始 IP 头 (20 字节): ver/IHL(1) tos(1) len(2) id(2) frag(2) ttl(1) proto(1) csum(2) srcIP(4) dstIP(4)
+		inner = append(inner, 0x45, 0x00, 0x00, 0x1c)
+		inner = append(inner, make([]byte, 8)...) // id + frag + ttl + proto + csum
+		inner = append(inner, 10, 0, 0, 1)        // 源 IP
+		inner = append(inner, 10, 0, 0, 2)        // 目的 IP
+		// 原始 TCP 头前 8 字节: 源端口(2) + 目的端口(2) + seq(4)
+		inner = append(inner,
+			byte(srcPort>>8), byte(srcPort),
+			byte(dstPort>>8), byte(dstPort),
+			0, 0, 0, 0)
+
+		icmp := []byte{11, 0, 0, 0, 0, 0, 0, 0} // type=11, code=0, checksum, unused
+		icmp = append(icmp, inner...)
+
+		if !includeOuterIP {
+			return icmp
+		}
+		// Windows 格式: 外层 IP 头(20) + ICMP
+		outer := []byte{0x45, 0x00, 0x00, 0x38}
+		outer = append(outer, make([]byte, 8)...)
+		outer = append(outer, 192, 168, 1, 1)
+		outer = append(outer, 192, 168, 1, 2)
+		return append(outer, icmp...)
+	}
+
+	tests := []struct {
+		name     string
+		buf      []byte
+		wantPort int
+		wantOK   bool
+	}{
+		{"linux format match", makeIcmp(false, 50000, 8085), 8085, true},
+		{"windows format match", makeIcmp(true, 50000, 8085), 8085, true},
+		{"linux different port", makeIcmp(false, 50000, 9090), 9090, true},
+		{"empty buffer", nil, 0, false},
+		{"too short", []byte{11, 0}, 0, false},
+	}
+
+	for _, tt := range tests {
+		gotPort, gotOK := parseIcmpTriggerPort(tt.buf)
+		if gotOK != tt.wantOK || (gotOK && gotPort != tt.wantPort) {
+			t.Errorf("%s: parseIcmpTriggerPort = (%d, %v), want (%d, %v)",
+				tt.name, gotPort, gotOK, tt.wantPort, tt.wantOK)
 		}
 	}
 }
