@@ -136,25 +136,11 @@ jobs:
         echo "Built: $output_name"
         ls -lh "$output_name"
 
-    # 打包：Windows 打 zip，Linux/macOS/FreeBSD/OpenBSD 打 tar.gz
-    - name: Package
-      run: |
-        BINARY_NAME=port-test-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.notes }}${{ matrix.ext }}
-        if [[ "${{ matrix.os }}" == "windows" ]]; then
-          BASE="${BINARY_NAME%.exe}"
-          zip -j "${BASE}.zip" "${BINARY_NAME}"
-          rm -f "${BINARY_NAME}"
-        else
-          tar czf "${BINARY_NAME}.tar.gz" "${BINARY_NAME}"
-          rm -f "${BINARY_NAME}"
-        fi
-        ls -lh
-
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: port-test-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.notes }}
-        path: port-test-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.notes }}*
+        path: port-test-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.notes }}${{ matrix.ext }}
         retention-days: 30
 
   release:
