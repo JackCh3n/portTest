@@ -394,10 +394,12 @@ go test -v ./...
 提交代码自动触发构建，Release 标签格式：`v年_月日`（如 `v2026_0807`）；推送 tag（如 `v1.0.0`）则使用 tag 名作为版本号正式发版，也支持手动触发。
 
 - **GitHub Actions**（`.github/workflows/build.yml`）：push 到 main/master 或 tag → 构建 17 平台 → zip/tar.gz 打包 → 创建 Release
-- **CNB 流水线**（`.cnb.yml`）：master push / tag 推送 / 手动触发 → 与 GitHub 相同流程构建发布
+- **CNB 流水线**（`.cnb.yml`）：master push / tag 推送 / 手动触发 → 与 GitHub 相同流程构建发布（打包统一为 `.tar.gz`，golang 镜像无 zip 命令）
 - **PR 质量门禁**：go vet + go test
 
-二进制产物命名（不带时间戳）：`port-test-<系统>-<架构>[-x86][.exe]`，发布时打包为 `.zip`（Windows）或 `.tar.gz`（其他系统）
+二进制产物命名（不带时间戳）：`port-test-<系统>-<架构>[-x86][.exe]`。发布格式：
+- **GitHub Actions**：Windows 打包为 `.zip`，其他平台为 `.tar.gz`
+- **CNB**：全部平台统一打包为 `.tar.gz`（Windows 二进制去掉 `.exe` 后缀命名）
 
 | 系统 | 架构 | 示例 |
 | --- | --- | --- |

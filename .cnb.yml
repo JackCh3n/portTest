@@ -54,13 +54,11 @@ master:
           script: |
             set -e
             cd dist
-            zip -j port-test-windows-amd64.zip port-test-windows-amd64.exe
-            zip -j port-test-windows-386-x86.zip port-test-windows-386-x86.exe
-            zip -j port-test-windows-arm64.zip port-test-windows-arm64.exe
-            for f in port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
-              tar czf "${f}.tar.gz" "$f"
+            # 全部平台打 tar.gz（golang 镜像无 zip 命令），Windows 去 .exe 后缀
+            for f in port-test-windows-* port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
+              tar czf "${f%.exe}.tar.gz" "$f"
             done
-            # 只保留压缩包，精确删除原始二进制（避免通配符误删 tar.gz）
+            # 只保留压缩包，精确删除原始二进制
             rm -f port-test-windows-amd64.exe port-test-windows-386-x86.exe port-test-windows-arm64.exe
             rm -f port-test-linux-amd64 port-test-linux-386-x86 port-test-linux-arm64 port-test-linux-arm
             rm -f port-test-linux-mips64 port-test-linux-mips64le port-test-linux-mips port-test-linux-mipsle port-test-linux-loong64
@@ -124,12 +122,11 @@ master:
           script: |
             set -e
             cd dist
-            zip -j port-test-windows-amd64.zip port-test-windows-amd64.exe
-            zip -j port-test-windows-386-x86.zip port-test-windows-386-x86.exe
-            zip -j port-test-windows-arm64.zip port-test-windows-arm64.exe
-            for f in port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
-              tar czf "${f}.tar.gz" "$f"
+            # 全部平台打 tar.gz（golang 镜像无 zip 命令），Windows 去 .exe 后缀
+            for f in port-test-windows-* port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
+              tar czf "${f%.exe}.tar.gz" "$f"
             done
+            # 只保留压缩包，精确删除原始二进制
             rm -f port-test-windows-amd64.exe port-test-windows-386-x86.exe port-test-windows-arm64.exe
             rm -f port-test-linux-amd64 port-test-linux-386-x86 port-test-linux-arm64 port-test-linux-arm
             rm -f port-test-linux-mips64 port-test-linux-mips64le port-test-linux-mips port-test-linux-mipsle port-test-linux-loong64
@@ -184,12 +181,11 @@ master:
           script: |
             set -e
             cd dist
-            zip -j port-test-windows-amd64.zip port-test-windows-amd64.exe
-            zip -j port-test-windows-386-x86.zip port-test-windows-386-x86.exe
-            zip -j port-test-windows-arm64.zip port-test-windows-arm64.exe
-            for f in port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
-              tar czf "${f}.tar.gz" "$f"
+            # 全部平台打 tar.gz（golang 镜像无 zip 命令），Windows 去 .exe 后缀
+            for f in port-test-windows-* port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
+              tar czf "${f%.exe}.tar.gz" "$f"
             done
+            # 只保留压缩包，精确删除原始二进制
             rm -f port-test-windows-amd64.exe port-test-windows-386-x86.exe port-test-windows-arm64.exe
             rm -f port-test-linux-amd64 port-test-linux-386-x86 port-test-linux-arm64 port-test-linux-arm
             rm -f port-test-linux-mips64 port-test-linux-mips64le port-test-linux-mips port-test-linux-mipsle port-test-linux-loong64
