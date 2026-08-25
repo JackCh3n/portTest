@@ -196,7 +196,8 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
-        allow_update: true
+        # v2 默认行为: 同名 release 已存在时直接更新(无需 allow_update,
+        # 该参数 v2 不支持会触发 Unexpected input 警告)
         fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
