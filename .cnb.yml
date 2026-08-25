@@ -1,59 +1,286 @@
 # ============================================================
-# Port Test Tool - CNB 流水线配置（.cnb.yml）
-# 与 .github/workflows/build.yml（GitHub Actions）功能对齐：
-#   - PR：go vet + go test 检查
-#   - push 到 main/master：跨平台编译全平台二进制 → 创建 Release
-#     （标签格式 v年_月日_时分，与 GitHub Actions 一致）→ 上传二进制附件
+# Port Test Tool — CNB.cool 云原生构建流水线
+# 与 .github/workflows/build.yml（GitHub Actions）行为对齐：
+#   - 推送到 master：vet+test → 构建 17 个平台二进制 → zip/tar.gz 打包
+#     → 生成时间戳版本号（vYYYY_MMDD_HHmm）→ 创建 Release → 上传附件
+#   - 推送 tag（如 git tag v1.0.0）：正式发版，版本号取 Tag 名
+#   - PR：跑 go vet + go test 做质量门禁
+#   - 手动触发（web_trigger）：与 master push 相同流程
+# 注意：不使用 YAML anchor（&xxx / <<: *xxx），CNB 解析器对其支持不可靠，
+#       全部显式展开，与 aimodels 项目保持一致。
 # ============================================================
 
-# 公共配置：Go 构建环境（与 go.mod 的 go 1.25 保持一致）
-.go-env: &go-env
-  docker:
-    image: golang:1.25
+# --- master 分支 push：自动构建 + 日期版本 Release ---
+master:
+  push:
+    - name: build-and-release
+      runner:
+        cpus: 8
+      docker:
+        image: golang:1.25
+      ifModify:
+        - "*.go"
+        - "go.mod"
+        - "go.sum"
+        - ".cnb.yml"
+      stages:
+        # 生成时间戳版本号（vYYYY_MMDD，与 GitHub Actions 一致）
+        - name: set-version
+          script: |
+            export TZ=Asia/Shanghai
+            VERSION="v$(date +'%Y_%m%d')"
+            echo "==> 构建版本: $VERSION"
+            echo "##[set-output VERSION=$VERSION]"
+          exports:
+            VERSION: RELEASE_VERSION
 
-# push → 构建 + Release 的流水线模板
-.build-and-release: &build-and-release
-  name: build-and-release
-  <<: *go-env
-  stages:
-    - name: compute release tag
-      script: echo "##[set-output RELEASE_TAG=v$(date +'%Y_%m%d_%H%M')]"
-      exports:
-        RELEASE_TAG: RELEASE_TAG
-    - name: run tests
-      script: go test ./...
-    - name: build all binaries
-      script: ./build.sh all
-    - name: create release
-      type: git:release
-      options:
-        tag: $RELEASE_TAG
-        title: $RELEASE_TAG
-        description: "Port Test Tool 自动发布 $RELEASE_TAG"
-        latest: true
-    - name: upload release assets
-      image: cnbcool/attachments:latest
-      settings:
-        tag: $RELEASE_TAG
-        attachments:
-          - "./dist/*"
+        # 测试 + 静态检查
+        - name: test
+          script: |
+            set -e
+            go vet ./...
+            go test ./...
 
-# ---------- PR 检查：vet + 单测 ----------
+        # 构建 17 个平台（与 GitHub Actions 矩阵一致，CGO 关闭避免交叉编译失败）
+        - name: build-binaries
+          script: |
+            set -e
+            export TZ=Asia/Shanghai
+            mkdir -p dist
+            BUILD="go build -trimpath -ldflags \"-s -w\""
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $BUILD -o dist/port-test-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386   $BUILD -o dist/port-test-windows-386-x86.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $BUILD -o dist/port-test-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   $BUILD -o dist/port-test-linux-amd64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=386     $BUILD -o dist/port-test-linux-386-x86 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   $BUILD -o dist/port-test-linux-arm64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm     $BUILD -o dist/port-test-linux-arm .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips64  $BUILD -o dist/port-test-linux-mips64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips64le $BUILD -o dist/port-test-linux-mips64le .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips    $BUILD -o dist/port-test-linux-mips .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mipsle  $BUILD -o dist/port-test-linux-mipsle .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 $BUILD -o dist/port-test-linux-loong64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   $BUILD -o dist/port-test-darwin-amd64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   $BUILD -o dist/port-test-darwin-arm64 .
+            CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64   $BUILD -o dist/port-test-freebsd-amd64 .
+            CGO_ENABLED=0 GOOS=freebsd GOARCH=arm64   $BUILD -o dist/port-test-freebsd-arm64 .
+            CGO_ENABLED=0 GOOS=openbsd GOARCH=amd64   $BUILD -o dist/port-test-openbsd-amd64 .
+            ls -lh dist/
+
+        # 打包：Windows 打 zip，Linux/macOS/FreeBSD/OpenBSD 打 tar.gz
+        - name: package
+          script: |
+            set -e
+            cd dist
+            zip -j port-test-windows-amd64.zip port-test-windows-amd64.exe
+            zip -j port-test-windows-386-x86.zip port-test-windows-386-x86.exe
+            zip -j port-test-windows-arm64.zip port-test-windows-arm64.exe
+            for f in port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
+              tar czf "${f}.tar.gz" "$f"
+            done
+            # 只保留压缩包，精确删除原始二进制（避免通配符误删 tar.gz）
+            rm -f port-test-windows-amd64.exe port-test-windows-386-x86.exe port-test-windows-arm64.exe
+            rm -f port-test-linux-amd64 port-test-linux-386-x86 port-test-linux-arm64 port-test-linux-arm
+            rm -f port-test-linux-mips64 port-test-linux-mips64le port-test-linux-mips port-test-linux-mipsle port-test-linux-loong64
+            rm -f port-test-darwin-amd64 port-test-darwin-arm64 port-test-freebsd-amd64 port-test-freebsd-arm64 port-test-openbsd-amd64
+            ls -lh
+
+        # 创建 Release
+        - name: create-release
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: $RELEASE_VERSION
+            description: "Port Test Tool 自动发布 $RELEASE_VERSION"
+            latest: true
+
+        # 上传打包产物为 Release 附件
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - "./dist/*"
+
+      endStages:
+        - name: summary
+          script: |
+            echo "Build $CNB_BUILD_ID finished"
+            echo "Release version: ${RELEASE_VERSION:-<none>}"
+            ls -lh dist/ || true
+
+# --- Tag 推送：正式发版（版本号取 Tag 名） ---
+"$":
+  tag_push:
+    - name: release-build
+      runner:
+        cpus: 8
+      docker:
+        image: golang:1.25
+      stages:
+        - name: set-version
+          script: |
+            VERSION="$CNB_BRANCH"
+            echo "==> 发版版本: $VERSION"
+            echo "##[set-output VERSION=$VERSION]"
+          exports:
+            VERSION: RELEASE_VERSION
+
+        - name: test
+          script: |
+            set -e
+            go vet ./...
+            go test ./...
+
+        - name: build-binaries
+          script: |
+            set -e
+            export TZ=Asia/Shanghai
+            mkdir -p dist
+            BUILD="go build -trimpath -ldflags \"-s -w\""
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $BUILD -o dist/port-test-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386   $BUILD -o dist/port-test-windows-386-x86.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $BUILD -o dist/port-test-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   $BUILD -o dist/port-test-linux-amd64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=386     $BUILD -o dist/port-test-linux-386-x86 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   $BUILD -o dist/port-test-linux-arm64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm     $BUILD -o dist/port-test-linux-arm .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips64  $BUILD -o dist/port-test-linux-mips64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips64le $BUILD -o dist/port-test-linux-mips64le .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips    $BUILD -o dist/port-test-linux-mips .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mipsle  $BUILD -o dist/port-test-linux-mipsle .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 $BUILD -o dist/port-test-linux-loong64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   $BUILD -o dist/port-test-darwin-amd64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   $BUILD -o dist/port-test-darwin-arm64 .
+            CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64   $BUILD -o dist/port-test-freebsd-amd64 .
+            CGO_ENABLED=0 GOOS=freebsd GOARCH=arm64   $BUILD -o dist/port-test-freebsd-arm64 .
+            CGO_ENABLED=0 GOOS=openbsd GOARCH=amd64   $BUILD -o dist/port-test-openbsd-amd64 .
+            ls -lh dist/
+
+        - name: package
+          script: |
+            set -e
+            cd dist
+            zip -j port-test-windows-amd64.zip port-test-windows-amd64.exe
+            zip -j port-test-windows-386-x86.zip port-test-windows-386-x86.exe
+            zip -j port-test-windows-arm64.zip port-test-windows-arm64.exe
+            for f in port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
+              tar czf "${f}.tar.gz" "$f"
+            done
+            rm -f port-test-windows-amd64.exe port-test-windows-386-x86.exe port-test-windows-arm64.exe
+            rm -f port-test-linux-amd64 port-test-linux-386-x86 port-test-linux-arm64 port-test-linux-arm
+            rm -f port-test-linux-mips64 port-test-linux-mips64le port-test-linux-mips port-test-linux-mipsle port-test-linux-loong64
+            rm -f port-test-darwin-amd64 port-test-darwin-arm64 port-test-freebsd-amd64 port-test-freebsd-arm64 port-test-openbsd-amd64
+            ls -lh
+
+        - name: create-release
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: $RELEASE_VERSION
+            description: "Port Test Tool 正式发布 $RELEASE_VERSION"
+            latest: true
+
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - "./dist/*"
+
+  # --- 手动触发：与 master push 相同流程 ---
+  web_trigger:
+    - name: manual-release
+      runner:
+        cpus: 8
+      docker:
+        image: golang:1.25
+      stages:
+        - name: set-version
+          script: |
+            export TZ=Asia/Shanghai
+            VERSION="v$(date +'%Y_%m%d')"
+            echo "==> 构建版本: $VERSION"
+            echo "##[set-output VERSION=$VERSION]"
+          exports:
+            VERSION: RELEASE_VERSION
+
+        - name: test
+          script: |
+            set -e
+            go vet ./...
+            go test ./...
+
+        - name: build-binaries
+          script: |
+            set -e
+            export TZ=Asia/Shanghai
+            mkdir -p dist
+            BUILD="go build -trimpath -ldflags \"-s -w\""
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $BUILD -o dist/port-test-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386   $BUILD -o dist/port-test-windows-386-x86.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $BUILD -o dist/port-test-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   $BUILD -o dist/port-test-linux-amd64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=386     $BUILD -o dist/port-test-linux-386-x86 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   $BUILD -o dist/port-test-linux-arm64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm     $BUILD -o dist/port-test-linux-arm .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips64  $BUILD -o dist/port-test-linux-mips64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips64le $BUILD -o dist/port-test-linux-mips64le .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mips    $BUILD -o dist/port-test-linux-mips .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=mipsle  $BUILD -o dist/port-test-linux-mipsle .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 $BUILD -o dist/port-test-linux-loong64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   $BUILD -o dist/port-test-darwin-amd64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   $BUILD -o dist/port-test-darwin-arm64 .
+            CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64   $BUILD -o dist/port-test-freebsd-amd64 .
+            CGO_ENABLED=0 GOOS=freebsd GOARCH=arm64   $BUILD -o dist/port-test-freebsd-arm64 .
+            CGO_ENABLED=0 GOOS=openbsd GOARCH=amd64   $BUILD -o dist/port-test-openbsd-amd64 .
+            ls -lh dist/
+
+        - name: package
+          script: |
+            set -e
+            cd dist
+            zip -j port-test-windows-amd64.zip port-test-windows-amd64.exe
+            zip -j port-test-windows-386-x86.zip port-test-windows-386-x86.exe
+            zip -j port-test-windows-arm64.zip port-test-windows-arm64.exe
+            for f in port-test-linux-* port-test-darwin-* port-test-freebsd-* port-test-openbsd-*; do
+              tar czf "${f}.tar.gz" "$f"
+            done
+            rm -f port-test-windows-amd64.exe port-test-windows-386-x86.exe port-test-windows-arm64.exe
+            rm -f port-test-linux-amd64 port-test-linux-386-x86 port-test-linux-arm64 port-test-linux-arm
+            rm -f port-test-linux-mips64 port-test-linux-mips64le port-test-linux-mips port-test-linux-mipsle port-test-linux-loong64
+            rm -f port-test-darwin-amd64 port-test-darwin-arm64 port-test-freebsd-amd64 port-test-freebsd-arm64 port-test-openbsd-amd64
+            ls -lh
+
+        - name: create-release
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: $RELEASE_VERSION
+            description: "Port Test Tool 手动发布 $RELEASE_VERSION"
+            latest: true
+
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - "./dist/*"
+
+# --- PR：质量门禁（vet + test） ---
 "**":
   pull_request:
     - name: pr-check
-      <<: *go-env
+      runner:
+        cpus: 8
+      docker:
+        image: golang:1.25
       stages:
-        - name: go vet
-          script: go vet ./...
-        - name: run tests
-          script: go test -v ./...
-
-# ---------- push 到 main / master：构建 + 生成 Release ----------
-main:
-  push:
-    - *build-and-release
-
-master:
-  push:
-    - *build-and-release
+        - name: vet
+          script: |
+            set -e
+            go vet ./...
+        - name: test
+          script: |
+            set -e
+            go test ./...

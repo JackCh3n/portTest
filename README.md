@@ -389,18 +389,22 @@ GOOS=darwin GOARCH=arm64 go build -o port-test-mac-arm64 .
 go test -v ./...
 ```
 
-## GitHub Actions
+## 自动构建与发布（GitHub Actions / CNB）
 
-提交代码自动触发构建，Release 标题/标签格式：`v年_月日`（如 `v2026_0807`）
+提交代码自动触发构建，Release 标签格式：`v年_月日`（如 `v2026_0807`）；推送 tag（如 `v1.0.0`）则使用 tag 名作为版本号正式发版，也支持手动触发。
 
-二进制产物命名（不带时间戳）：`port-test-<系统>-<架构>[.exe]`
+- **GitHub Actions**（`.github/workflows/build.yml`）：push 到 main/master 或 tag → 构建 17 平台 → zip/tar.gz 打包 → 创建 Release
+- **CNB 流水线**（`.cnb.yml`）：master push / tag 推送 / 手动触发 → 与 GitHub 相同流程构建发布
+- **PR 质量门禁**：go vet + go test
+
+二进制产物命名（不带时间戳）：`port-test-<系统>-<架构>[-x86][.exe]`，发布时打包为 `.zip`（Windows）或 `.tar.gz`（其他系统）
 
 | 系统 | 架构 | 示例 |
 | --- | --- | --- |
-| Windows | x86 / x64 / ARM64 | `port-test-windows-386.exe` |
-| Linux | x86 / x64 / ARM / ARM64 / MIPS / LoongArch | `port-test-linux-amd64` |
-| macOS | x64 / ARM64 | `port-test-darwin-arm64` |
-| FreeBSD / OpenBSD | x64 / ARM64 | `port-test-freebsd-amd64` |
+| Windows | x86 / x64 / ARM64 | `port-test-windows-386-x86.zip` |
+| Linux | x86 / x64 / ARM / ARM64 / MIPS / MIPSLE / MIPS64 / MIPS64LE / LoongArch | `port-test-linux-amd64.tar.gz` |
+| macOS | x64 / ARM64 | `port-test-darwin-arm64.tar.gz` |
+| FreeBSD / OpenBSD | x64 / ARM64 | `port-test-freebsd-amd64.tar.gz` |
 
 ## License
 
