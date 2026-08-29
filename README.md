@@ -15,15 +15,31 @@
 - 🌐 多主机批量测试，支持 IPv4/IPv6/域名
 - 🔧 丰富的位置参数写法，兼容传统 `-ip`/`-p` 写法
 - 📊 脚本友好：`-json-out` 机器可读输出 + 语义化退出码
-- 💻 跨平台：Windows / Linux / macOS / FreeBSD / ARM / MIPS / LoongArch
+- 💻 跨平台：Windows / Linux / macOS / FreeBSD / OpenBSD / ARM / MIPS / LoongArch（17 个平台预编译二进制）
 
 ## 快速开始
 
 ### 安装
 
+**方式一：下载预编译二进制（推荐）**
+
+从 [Releases](https://github.com/JackCh3n/portTest/releases) 下载对应平台二进制，无需解压，下载即用：
+
 ```bash
-go install github.com/yourname/port-test@latest
+# 例如 Linux x64
+curl -LO https://github.com/JackCh3n/portTest/releases/latest/download/port-test-linux-amd64
+chmod +x port-test-linux-amd64
 ```
+
+**方式二：go install**
+
+```bash
+go install github.com/JackCh3n/portTest@latest
+```
+
+**方式三：源码构建**
+
+详见下方「构建」章节。当前版本：`v1.1.0`（运行 `port-test -version` 查看）。
 
 ### Port 模式
 
@@ -322,6 +338,13 @@ port-test -traceroute example.com -m 20 -w 2
 |------|--------|------|
 | `-p` | 常见端口表 | 扫描端口/范围（`1-1024`、`1-65535`） |
 
+### UDP 模式
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-p` | - | 端口（传统写法，与位置参数端口合并） |
+| `-timeout` | `3` | 连接超时（秒） |
+
 ### DNS 模式
 
 | 参数 | 默认值 | 说明 |
@@ -356,13 +379,24 @@ port-test -traceroute example.com -m 20 -w 2
 ./build.sh              # 默认: win-x86 + linux-x86
 ./build.sh win          # 所有 Windows 平台
 ./build.sh linux        # 所有 Linux 平台
-./build.sh all          # 全部 15 种平台
+./build.sh all          # 全部 17 种平台
 ./build.sh list         # 查看支持的平台
 
 # Windows CMD
 build.bat               # 默认: win-x86 + linux-x86
 build.bat all           # 全部平台
 ```
+
+### CI 构建脚本
+
+`scripts/build-all.sh` 是 CI（CNB）使用的 17 平台交叉编译脚本，也等价于 `./build.sh all`：
+
+```bash
+bash ./scripts/build-all.sh    # 编译 17 个平台到 dist/
+```
+
+> 脚本内置 `CGO_ENABLED=0`，产物命名与 CI Release 完全一致（`port-test-<系统>-<架构>[-x86][.exe]`）。
+> 注意：构建命令用 `-ldflags="-s -w"` 等号写法，避免引号在变量展开后拆分出错。
 
 ### 手动交叉编译
 
@@ -374,14 +408,17 @@ GOOS=darwin GOARCH=arm64 go build -o port-test-mac-arm64 .
 
 ## 支持的平台
 
+支持 17 个平台的预编译二进制（CI 每次提交自动构建）：
+
 | 操作系统 | 架构 | 说明 |
 |---------|------|------|
 | Windows | x86 / x64 / ARM64 | ✅ |
 | Linux | x86 / x64 / ARM / ARM64 | ✅ |
-| Linux | MIPS64 / MIPS64LE | ✅ 国产芯片 |
+| Linux | MIPS / MIPSLE / MIPS64 / MIPS64LE | ✅ 国产芯片 |
 | Linux | LoongArch64 | ✅ 龙芯 |
 | macOS | x64 / ARM64 | ✅ |
 | FreeBSD | x64 / ARM64 | ✅ |
+| OpenBSD | x64 | ✅ |
 
 ## 测试
 
