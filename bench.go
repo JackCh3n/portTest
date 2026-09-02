@@ -15,12 +15,13 @@ import (
 
 // runBenchMode 轻量 HTTP 压测模式
 // 用法:
-//   port-test -bench https://example.com                 100 请求, 10 并发
-//   port-test -bench https://example.com -n 1000 -c 50   1000 请求, 50 并发
-//   port-test -bench http://api.com/login -X POST -d 'a=1'   POST 压测
-//   port-test -bench https://x.com -k -timeout 10        忽略证书 + 超时
-//   port-test -bench https://x.com -L                    跟随重定向
-//   port-test -bench https://x.com -ka                   复用连接 (keep-alive)
+//
+//	port-test -bench https://example.com                 100 请求, 10 并发
+//	port-test -bench https://example.com -n 1000 -c 50   1000 请求, 50 并发
+//	port-test -bench http://api.com/login -X POST -d 'a=1'   POST 压测
+//	port-test -bench https://x.com -k -timeout 10        忽略证书 + 超时
+//	port-test -bench https://x.com -L                    跟随重定向
+//	port-test -bench https://x.com -ka                   复用连接 (keep-alive)
 func runBenchMode(posArgs []string, method, data string, headers headerList, insecure, followRedirect, keepAlive bool, timeoutSec, total, concurrency int) {
 	// 校验 URL
 	if len(posArgs) == 0 {
@@ -84,7 +85,14 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 			if idx <= 0 {
 				continue
 			}
-			req.Header.Set(strings.TrimSpace(h[:idx]), strings.TrimSpace(h[idx+1:]))
+			key := strings.TrimSpace(h[:idx])
+			val := strings.TrimSpace(h[idx+1:])
+			if strings.EqualFold(key, "Host") {
+				// Go 忽略 Header 里的 Host, 覆盖请求 Host 必须设置 req.Host
+				req.Host = val
+				continue
+			}
+			req.Header.Set(key, val)
 		}
 		if body != nil && req.Header.Get("Content-Type") == "" {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -210,9 +218,11 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 		return latencies[idx]
 	}
 
+	// QPS 按完成的请求数（成功+失败）计算, 与主流压测工具一致;
+	// 只算成功会在服务端大量 5xx 时严重低估实际吞吐
 	qps := 0.0
 	if elapsedSec := elapsed.Seconds(); elapsedSec > 0 {
-		qps = float64(successN) / elapsedSec
+		qps = float64(successN+failedN) / elapsedSec
 	}
 
 	fmt.Println("  压测结果:")

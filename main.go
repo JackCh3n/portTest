@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -63,7 +64,6 @@ func printUsage() {
 	fmt.Println("    port-test -port [端口...]      启动 HTTP 测试服务")
 	fmt.Println("    port-test -tcping <目标...>    TCP 端口连通性测试")
 	fmt.Println("    port-test -curl <URL>          模拟 curl 抓取网页内容")
-	fmt.Println("    port-test -scan <主机>         快速端口扫描")
 	fmt.Println("    port-test -bench <URL>         轻量 HTTP 压测")
 	fmt.Println("    port-test -udp <目标...>       UDP 连通性测试")
 	fmt.Println("    port-test -dns <域名>          DNS 记录查询")
@@ -100,13 +100,6 @@ func printUsage() {
 	fmt.Println("    port-test -curl http://api.com/json -X POST -d '{\"k\":1}' -H 'Content-Type: application/json'")
 	fmt.Println("    port-test -curl http://api.com -H 'Authorization: Bearer xxx' -H 'X-Custom: 1'")
 	fmt.Println()
-	fmt.Println("  SCAN 模式 (端口扫描):")
-	fmt.Println("    port-test -scan 10.0.0.1                 扫描常见端口")
-	fmt.Println("    port-test -scan 10.0.0.1 -p 1-1024       扫描指定范围")
-	fmt.Println("    port-test -scan 10.0.0.1 -p 80 443 8080  空格分隔端口")
-	fmt.Println("    port-test -scan 10.0.0.1 -p 1-65535      全端口扫描")
-	fmt.Println("    port-test -scan 10.0.0.1 -json-out       JSON 输出")
-	fmt.Println()
 	fmt.Println("  BENCH 模式 (HTTP 压测):")
 	fmt.Println("    port-test -bench https://example.com                  100请求/10并发")
 	fmt.Println("    port-test -bench https://example.com -n 1000 -c 50    1000请求/50并发")
@@ -127,8 +120,8 @@ func printUsage() {
 	fmt.Println("    port-test -traceroute example.com -m 20 -w 2     最大20跳/超时2秒")
 	fmt.Println()
 	fmt.Println("  全局选项:")
-	fmt.Println("    -timeout <sec>    连接超时时间 (tcping/curl/scan/udp, 默认: 3)")
-	fmt.Println("    -json-out         JSON 输出 (tcping/scan, 便于脚本解析)")
+	fmt.Println("    -timeout <sec>    连接超时时间 (tcping/curl/udp, 默认: 3)")
+	fmt.Println("    -json-out         JSON 输出 (tcping, 便于脚本解析)")
 	fmt.Println("    -count <num>      测试次数 (tcping, 默认: 1)")
 	fmt.Println("    -interval <sec>   重试间隔秒 (tcping, 默认: 1)")
 	fmt.Println("    -X <method>       HTTP 方法 (curl/bench, 默认: GET)")
@@ -168,7 +161,6 @@ func main() {
 	usePort := flag.Bool("port", false, "Port 模式: 启动 HTTP 测试服务")
 	useTcping := flag.Bool("tcping", false, "TCPing 模式: TCP 端口连通性测试")
 	useCurl := flag.Bool("curl", false, "CURL 模式: 模拟 curl 抓取内容")
-	useScan := flag.Bool("scan", false, "SCAN 模式: 快速端口扫描")
 	useBench := flag.Bool("bench", false, "BENCH 模式: 轻量 HTTP 压测")
 	useUdp := flag.Bool("udp", false, "UDP 模式: UDP 连通性测试")
 	useDns := flag.Bool("dns", false, "DNS 模式: DNS 记录查询")
@@ -176,10 +168,10 @@ func main() {
 
 	// TCPing 参数
 	target := flag.String("ip", "", "目标IP地址 (tcping 模式) 或 DNS 服务器 (dns 模式)")
-	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping/curl/scan/udp/traceroute 模式)")
+	timeout := flag.Int("timeout", 3, "连接超时时间(秒, tcping/curl/udp/traceroute 模式)")
 	count := flag.Int("count", 1, "测试次数 (tcping 模式)")
 	interval := flag.Int("interval", 1, "重试间隔(秒, tcping 模式)")
-	jsonOut := flag.Bool("json-out", false, "输出 JSON 结果 (tcping/scan 模式)")
+	jsonOut := flag.Bool("json-out", false, "输出 JSON 结果 (tcping 模式)")
 
 	// CURL/BENCH 参数
 	method := flag.String("X", "", "HTTP 方法 (curl/bench 模式, 默认 GET)")
@@ -206,7 +198,7 @@ func main() {
 	// 解析失败: -h/--help 属于正常帮助请求退出 0, 其余按文档语义退出 1
 	// (ContinueOnError 模式下需调用 CommandLine.Parse 才能拿到错误)
 	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
-		if err == flag.ErrHelp {
+		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
 		os.Exit(exitUsage)
@@ -219,39 +211,38 @@ func main() {
 	// Go flag 包在遇到第一个非 flag 参数后停止解析，URL 后面的 flag 会残留在位置参数中
 	posArgs = extractTrailingFlags(posArgs,
 		&flagOpts{
-			timeout:       timeout,
-			count:         count,
-			interval:      interval,
-			ip:            target,
-			portStr:       portStr,
-			method:        method,
-			data:          data,
-			headers:       &headers,
-			insecure:      insecure,
+			timeout:        timeout,
+			count:          count,
+			interval:       interval,
+			ip:             target,
+			portStr:        portStr,
+			method:         method,
+			data:           data,
+			headers:        &headers,
+			insecure:       insecure,
 			followRedirect: followRedirect,
-			code:          code,
-			usePort:       usePort,
-			useTcping:     useTcping,
-			useCurl:       useCurl,
-			useScan:       useScan,
-			useBench:      useBench,
-			useUdp:        useUdp,
-			useDns:        useDns,
-			useTraceroute: useTraceroute,
-			benchTotal:    benchTotal,
-			benchConc:     benchConcurrency,
+			code:           code,
+			usePort:        usePort,
+			useTcping:      useTcping,
+			useCurl:        useCurl,
+			useBench:       useBench,
+			useUdp:         useUdp,
+			useDns:         useDns,
+			useTraceroute:  useTraceroute,
+			benchTotal:     benchTotal,
+			benchConc:      benchConcurrency,
 			benchKeepAlive: benchKeepAlive,
-			dnsType:       dnsType,
-			trTcp:         trTcp,
-			trMaxHops:     trMaxHops,
-			trWait:        trWait,
-			showVersion:   showVersion,
-			html:          htmlPath,
-			jsonStr:       jsonStr,
-			staticDir:     staticDir,
-			tlsCert:       tlsCert,
-			tlsKey:        tlsKey,
-			jsonOut:       jsonOut,
+			dnsType:        dnsType,
+			trTcp:          trTcp,
+			trMaxHops:      trMaxHops,
+			trWait:         trWait,
+			showVersion:    showVersion,
+			html:           htmlPath,
+			jsonStr:        jsonStr,
+			staticDir:      staticDir,
+			tlsCert:        tlsCert,
+			tlsKey:         tlsKey,
+			jsonOut:        jsonOut,
 		})
 
 	// 显示版本（可能在 flag.Parse 或 extractTrailingFlags 中被设置）
@@ -276,7 +267,7 @@ func main() {
 
 	// 无任何模式开关且无位置参数时显示帮助
 	// 兼容旧用法: 只带 -p/-code 等参数时默认走 port 模式
-	if !*usePort && !*useTcping && !*useCurl && !*useScan && !*useBench && !*useUdp && !*useDns && !*useTraceroute {
+	if !*usePort && !*useTcping && !*useCurl && !*useBench && !*useUdp && !*useDns && !*useTraceroute {
 		if len(posArgs) == 0 && *portStr == "" && *target == "" {
 			printUsage()
 			os.Exit(0)
@@ -287,13 +278,13 @@ func main() {
 
 	// 同时指定多个模式时报错
 	modes := 0
-	for _, m := range []bool{*usePort, *useTcping, *useCurl, *useScan, *useBench, *useUdp, *useDns, *useTraceroute} {
+	for _, m := range []bool{*usePort, *useTcping, *useCurl, *useBench, *useUdp, *useDns, *useTraceroute} {
 		if m {
 			modes++
 		}
 	}
 	if modes > 1 {
-		fmt.Println("  错误: 只能指定一种模式 (-port / -tcping / -curl / -scan / -bench / -udp / -dns / -traceroute 互斥)")
+		fmt.Println("  错误: 只能指定一种模式 (-port / -tcping / -curl / -bench / -udp / -dns / -traceroute 互斥)")
 		os.Exit(exitUsage)
 	}
 
@@ -306,10 +297,6 @@ func main() {
 	case *useTcping:
 		printHeader()
 		runTcpingMode(posArgs, *target, *portStr, *timeout, *count, *interval, *jsonOut)
-
-	case *useScan:
-		printHeader()
-		runScanMode(posArgs, *portStr, *timeout, *jsonOut)
 
 	case *useBench:
 		printHeader()
@@ -325,7 +312,7 @@ func main() {
 
 	case *useTraceroute:
 		printHeader()
-		// traceroute 端口从 -p 解析（与 scan/tcping 共用）
+		// traceroute 端口从 -p 解析（与 tcping 共用）
 		trPort := 0
 		if *portStr != "" {
 			parsed := parsePortRange(*portStr)
@@ -358,15 +345,27 @@ func main() {
 func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count, intervalSec int, jsonOut bool) {
 	var targets []HostTarget
 
+	// -p 补充的端口应用到所有主机（提前解析一次, 无效时警告）
+	var extraPorts []int
+	if flagPorts != "" {
+		extraPorts = parsePortRange(flagPorts)
+		if len(extraPorts) == 0 {
+			fmt.Printf("  警告: 忽略无效端口: %q\n", flagPorts)
+		}
+	}
+
 	if flagIP != "" {
 		// 传统写法: -ip 是主机, -p 和位置参数都是端口
 		// 支持 "port-test -tcping -ip 10.0.0.1 -p 80 443" 空格分隔端口
 		ht := HostTarget{Host: flagIP}
-		if flagPorts != "" {
-			ht.Ports = append(ht.Ports, parsePortRange(flagPorts)...)
-		}
+		ht.Ports = append(ht.Ports, extraPorts...)
 		for _, p := range posArgs {
-			ht.Ports = append(ht.Ports, parsePortRange(p)...)
+			parsed := parsePortRange(p)
+			if len(parsed) == 0 {
+				fmt.Printf("  警告: 忽略无效端口: %q\n", p)
+				continue
+			}
+			ht.Ports = append(ht.Ports, parsed...)
 		}
 		if len(ht.Ports) > 0 {
 			targets = append(targets, ht)
@@ -388,14 +387,17 @@ func runTcpingMode(posArgs []string, flagIP, flagPorts string, timeoutSec, count
 				continue
 			}
 			// -p 补充的端口同样生效（应用到所有主机, 与 -ip 传统写法行为一致）
-			if flagPorts != "" {
-				ht.Ports = append(ht.Ports, parsePortRange(flagPorts)...)
-			}
+			ht.Ports = append(ht.Ports, extraPorts...)
 			targets = append(targets, ht)
 		}
 	}
 
 	// 校验
+	// -ip 已指定但没有任何有效端口时给出明确错误（而非笼统的"请指定目标地址"）
+	if flagIP != "" && len(targets) == 0 {
+		fmt.Printf("  错误: 主机 %s 未指定端口 (用 -p 或位置参数指定)\n", flagIP)
+		os.Exit(exitUsage)
+	}
 	if len(targets) == 0 {
 		fmt.Println("  错误: 请指定目标地址")
 		fmt.Println("  用法: port-test -tcping <host:port> [port2 ...] [# host2:port ...]")
@@ -474,7 +476,12 @@ func parseHostSegment(seg string) HostTarget {
 
 	// 后续部分都是端口
 	for _, p := range parts[1:] {
-		ht.Ports = append(ht.Ports, parsePortRange(p)...)
+		parsed := parsePortRange(p)
+		if len(parsed) == 0 {
+			fmt.Printf("  警告: 忽略无效端口: %q\n", p)
+			continue
+		}
+		ht.Ports = append(ht.Ports, parsed...)
 	}
 
 	return ht
@@ -503,11 +510,11 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		}
 	}
 
-	// 回退到 -p flag
+	// 回退到 -p flag（parsePortRange 与位置参数一致, 支持范围写法如 -p 8000-8010）
 	if len(ports) == 0 && flagPorts != "" {
-		parsed, err := parsePorts(flagPorts)
-		if err != nil {
-			fmt.Printf("  端口解析错误: %v\n", err)
+		parsed := parsePortRange(flagPorts)
+		if len(parsed) == 0 {
+			fmt.Printf("  错误: 无效端口: %s\n", flagPorts)
 			os.Exit(exitUsage)
 		}
 		ports = parsed
@@ -592,16 +599,14 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	fmt.Println("  ------------------------------------")
 
 	// 启动 HTTP 服务器
-	// 优雅退出策略: 任一端口启动失败(如被占用)时, 关闭所有已启动的 server 再退出
+	// 优雅退出策略: 任一端口启动失败(如被占用)或用户 Ctrl+C 时,
+	// 关闭所有已启动的 server 再退出
 	servers := make([]*http.Server, 0, len(config.Ports))
-	var mu sync.Mutex
 	serverErr := make(chan error, len(config.Ports))
 
 	for _, port := range config.Ports {
 		srv := newServer(port)
-		mu.Lock()
 		servers = append(servers, srv)
-		mu.Unlock()
 
 		go func(s *http.Server) {
 			var err error
@@ -616,9 +621,18 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		}(srv)
 	}
 
-	// 等待任一 server 出错（正常运行时会一直阻塞在此）
-	err := <-serverErr
-	fmt.Println(err)
+	// 等待任一 server 出错（正常运行时会一直阻塞在此）或用户中断
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	interrupted := false
+	select {
+	case err := <-serverErr:
+		fmt.Println(err)
+	case <-sigCh:
+		interrupted = true
+		fmt.Println()
+		fmt.Println("  收到中断信号, 正在关闭服务器...")
+	}
 
 	// 优雅关闭所有已启动的 server（含出错端口自身）
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -627,6 +641,10 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		_ = s.Shutdown(ctx)
 	}
 	fmt.Println("  已关闭所有服务器")
+	if interrupted {
+		// 用户主动中断属正常退出
+		os.Exit(exitOK)
+	}
 	os.Exit(exitInterrupted)
 }
 
@@ -813,7 +831,7 @@ type flagOpts struct {
 	followRedirect           *bool
 	code                     *int
 	usePort, useTcping       *bool
-	useCurl, useScan         *bool
+	useCurl                  *bool
 	useBench, useUdp         *bool
 	useDns, useTraceroute    *bool
 	benchTotal, benchConc    *int
@@ -834,34 +852,123 @@ type flagOpts struct {
 // 应用到对应 flag 变量，并返回剩余的真实位置参数。
 func extractTrailingFlags(args []string, opts *flagOpts) []string {
 	valueFlags := map[string]func(string){
-		"-timeout":  func(v string) { if opts.timeout != nil { *opts.timeout = atoiSafe(v, *opts.timeout) } },
-		"-count":    func(v string) { if opts.count != nil { *opts.count = atoiSafe(v, *opts.count) } },
-		"-interval": func(v string) { if opts.interval != nil { *opts.interval = atoiSafe(v, *opts.interval) } },
-		"-ip":       func(v string) { if opts.ip != nil { *opts.ip = v } },
-		"-p":        func(v string) { if opts.portStr != nil { *opts.portStr = v } },
-		"-X":        func(v string) { if opts.method != nil { *opts.method = v } },
-		"-d":        func(v string) { if opts.data != nil { *opts.data = v } },
-		"-H":        func(v string) { if opts.headers != nil { *opts.headers = append(*opts.headers, v) } },
-		"-code":     func(v string) { if opts.code != nil { *opts.code = atoiSafe(v, *opts.code) } },
-		"-n":        func(v string) { if opts.benchTotal != nil { *opts.benchTotal = atoiSafe(v, *opts.benchTotal) } },
-		"-c":        func(v string) { if opts.benchConc != nil { *opts.benchConc = atoiSafe(v, *opts.benchConc) } },
-		"-type":     func(v string) { if opts.dnsType != nil { *opts.dnsType = v } },
-		"-m":        func(v string) { if opts.trMaxHops != nil { *opts.trMaxHops = atoiSafe(v, *opts.trMaxHops) } },
-		"-w":        func(v string) { if opts.trWait != nil { *opts.trWait = atoiSafe(v, *opts.trWait) } },
-		"-html":     func(v string) { if opts.html != nil { *opts.html = v } },
-		"-json":     func(v string) { if opts.jsonStr != nil { *opts.jsonStr = v } },
-		"-dir":      func(v string) { if opts.staticDir != nil { *opts.staticDir = v } },
-		"-tls-cert": func(v string) { if opts.tlsCert != nil { *opts.tlsCert = v } },
-		"-tls-key":  func(v string) { if opts.tlsKey != nil { *opts.tlsKey = v } },
+		"-timeout": func(v string) {
+			if opts.timeout != nil {
+				*opts.timeout = atoiSafe(v, *opts.timeout)
+			}
+		},
+		"-count": func(v string) {
+			if opts.count != nil {
+				*opts.count = atoiSafe(v, *opts.count)
+			}
+		},
+		"-interval": func(v string) {
+			if opts.interval != nil {
+				*opts.interval = atoiSafe(v, *opts.interval)
+			}
+		},
+		"-ip": func(v string) {
+			if opts.ip != nil {
+				*opts.ip = v
+			}
+		},
+		"-p": func(v string) {
+			if opts.portStr != nil {
+				*opts.portStr = v
+			}
+		},
+		"-X": func(v string) {
+			if opts.method != nil {
+				*opts.method = v
+			}
+		},
+		"-d": func(v string) {
+			if opts.data != nil {
+				*opts.data = v
+			}
+		},
+		"-H": func(v string) {
+			if opts.headers != nil {
+				*opts.headers = append(*opts.headers, v)
+			}
+		},
+		"-code": func(v string) {
+			if opts.code != nil {
+				*opts.code = atoiSafe(v, *opts.code)
+			}
+		},
+		"-n": func(v string) {
+			if opts.benchTotal != nil {
+				*opts.benchTotal = atoiSafe(v, *opts.benchTotal)
+			}
+		},
+		"-c": func(v string) {
+			if opts.benchConc != nil {
+				*opts.benchConc = atoiSafe(v, *opts.benchConc)
+			}
+		},
+		"-type": func(v string) {
+			if opts.dnsType != nil {
+				*opts.dnsType = v
+			}
+		},
+		"-m": func(v string) {
+			if opts.trMaxHops != nil {
+				*opts.trMaxHops = atoiSafe(v, *opts.trMaxHops)
+			}
+		},
+		"-w": func(v string) {
+			if opts.trWait != nil {
+				*opts.trWait = atoiSafe(v, *opts.trWait)
+			}
+		},
+		"-html": func(v string) {
+			if opts.html != nil {
+				*opts.html = v
+			}
+		},
+		"-json": func(v string) {
+			if opts.jsonStr != nil {
+				*opts.jsonStr = v
+			}
+		},
+		"-dir": func(v string) {
+			if opts.staticDir != nil {
+				*opts.staticDir = v
+			}
+		},
+		"-tls-cert": func(v string) {
+			if opts.tlsCert != nil {
+				*opts.tlsCert = v
+			}
+		},
+		"-tls-key": func(v string) {
+			if opts.tlsKey != nil {
+				*opts.tlsKey = v
+			}
+		},
 	}
 
 	rest := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
+		// GNU 风格双横线兼容: --timeout 等价 -timeout
+		// 仅用于匹配, 未知参数保留原样进入位置参数
+		norm := arg
+		if len(norm) > 2 && strings.HasPrefix(norm, "--") {
+			norm = norm[1:]
+		}
+
+		// 后置 -h/--help: 打印帮助并正常退出
+		if norm == "-h" || norm == "--help" {
+			printUsage()
+			os.Exit(0)
+		}
+
 		// 布尔 flag
 		boolHandled := true
-		switch arg {
+		switch norm {
 		case "-k":
 			if opts.insecure != nil {
 				*opts.insecure = true
@@ -889,10 +996,6 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		case "-curl":
 			if opts.useCurl != nil {
 				*opts.useCurl = true
-			}
-		case "-scan":
-			if opts.useScan != nil {
-				*opts.useScan = true
 			}
 		case "-bench":
 			if opts.useBench != nil {
@@ -926,7 +1029,7 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 		}
 
 		// 值 flag: 需要下一个参数作为值
-		if fn, ok := valueFlags[arg]; ok {
+		if fn, ok := valueFlags[norm]; ok {
 			if i+1 < len(args) {
 				fn(args[i+1])
 				i++
@@ -936,7 +1039,7 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 			continue
 		}
 
-		// 普通位置参数
+		// 普通位置参数（保留原样, 不做 -- 归一化）
 		rest = append(rest, arg)
 	}
 	return rest

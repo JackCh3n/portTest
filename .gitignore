@@ -23,3 +23,5 @@ nul
 
 # Assistant internal data
 .workbuddy/
+.codebuddy/
+.mimosa/

@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	sioRCVALL        = 0x98000001
-	rcvallIPLevel    = 3 // Vista+: 接收 IP 层数据（含 ICMP 错误消息）
-	winIPProtoICMP   = 1 // IANA: ICMP 协议号 (syscall 包未导出该常量)
-	winIPProtoUDP    = 17
-	winSocketRaw     = 3 // SOCK_RAW (syscall 包未导出)
-	winAFINET        = 2 // AF_INET (syscall 包未导出)
+	sioRCVALL      = 0x98000001
+	rcvallIPLevel  = 3 // Vista+: 接收 IP 层数据（含 ICMP 错误消息）
+	winIPProtoICMP = 1 // IANA: ICMP 协议号 (syscall 包未导出该常量)
+	winIPProtoUDP  = 17
+	winSocketRaw   = 3 // SOCK_RAW (syscall 包未导出)
+	winAFINET      = 2 // AF_INET (syscall 包未导出)
 )
 
 // listenIcmp 创建 ICMP 监听 socket（Windows 专用）
@@ -27,8 +27,8 @@ const (
 // Time Exceeded / Destination Unreachable 等 ICMP 错误消息
 // 被系统直接丢弃, 不会到达 raw socket。
 // 要接收这些错误消息( traceroute 核心依赖), 必须:
-//   1. bind 到具体接口 IP（不能是 INADDR_ANY）
-//   2. 设置 SIO_RCVALL (RCVALL_IPLEVEL) 禁用包过滤
+//  1. bind 到具体接口 IP（不能是 INADDR_ANY）
+//  2. 设置 SIO_RCVALL (RCVALL_IPLEVEL) 禁用包过滤
 //
 // 注意: 需要管理员权限运行。
 func listenIcmp(dst net.IP) (*ipv4.PacketConn, error) {

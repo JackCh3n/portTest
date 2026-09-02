@@ -15,9 +15,11 @@ import (
 
 // runTracerouteMode 路由追踪模式
 // 用法:
-//   port-test -traceroute 10.0.0.1                     UDP traceroute
-//   port-test -traceroute example.com -T -p 443        TCP traceroute 到 443
-//   port-test -traceroute example.com -m 20 -w 2       最大 20 跳, 每跳超时 2 秒
+//
+//	port-test -traceroute 10.0.0.1                     UDP traceroute
+//	port-test -traceroute example.com -T -p 443        TCP traceroute 到 443
+//	port-test -traceroute example.com -m 20 -w 2       最大 20 跳, 每跳超时 2 秒
+//
 // 注意: 需要管理员/root 权限（原始 socket 监听 ICMP），Windows 需以管理员运行
 func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec int) {
 	// 校验目标
@@ -32,7 +34,7 @@ func runTracerouteMode(posArgs []string, tcpMode bool, port, maxHops, timeoutSec
 	ips, err := net.LookupIP(target)
 	if err != nil || len(ips) == 0 {
 		fmt.Printf("  错误: 无法解析目标: %s\n", target)
-		os.Exit(exitUsage)
+		os.Exit(exitConnFailed)
 	}
 	var dst net.IP
 	for _, ip := range ips {
@@ -418,6 +420,7 @@ func sendTcpProbe(pc *ipv4.PacketConn, dst net.IP, ttl, port int, timeout time.D
 //   - Linux: ECONNREFUSED=111
 //   - macOS: ECONNREFUSED=61
 //   - Windows: WSAECONNREFUSED=10061
+//
 // 注意: 不能只用 errors.Is(err, syscall.ECONNREFUSED)——Go 的 syscall 包在
 // Windows 上把该常量定义为 POSIX 语义别名(数值 ≠ 10061), errors.Is 会失败。
 // 需额外用 errors.As 提取 Errno 数值按平台匹配。

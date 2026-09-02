@@ -1,13 +1,12 @@
 # Port Test Tool
 
-一个轻量级网络调试工具，支持 **Port**（HTTP 测试服务）、**TCPing**（TCP 连通性测试）、**CURL**（模拟 curl）、**SCAN**（端口扫描）、**BENCH**（HTTP 压测）、**UDP**（UDP 测试）、**DNS**（DNS 查询）和 **TRACEROUTE**（路由追踪）共 8 种模式。
+一个轻量级网络调试工具，支持 **Port**（HTTP 测试服务）、**TCPing**（TCP 连通性测试）、**CURL**（模拟 curl）、**BENCH**（HTTP 压测）、**UDP**（UDP 测试）、**DNS**（DNS 查询）和 **TRACEROUTE**（路由追踪）共 7 种模式。
 
 ## 功能特性
 
 - 🛡️ **Port 模式**：启动 HTTP/HTTPS 服务器占用端口，返回自定义 JSON/HTML/状态码，内置 `/echo` 回显接口
 - 🗡️ **TCPing 模式**：主动 TCP 连接测试，验证网络是否畅通
 - 🌐 **CURL 模式**：模拟 curl 发送 HTTP/HTTPS 请求，支持 GET/POST、自定义头、忽略证书、跟随重定向
-- 🔍 **SCAN 模式**：快速端口扫描（常见端口/自定义范围/全端口），自动限制并发防资源耗尽
 - ⚡ **BENCH 模式**：轻量 HTTP 压测，输出 QPS/延迟分布（P50/P90/P99），支持短连接/keep-alive
 - 📦 **UDP 模式**：UDP 连通性测试
 - 🌏 **DNS 模式**：DNS 记录查询（A/AAAA/MX/CNAME/TXT/NS），支持自定义服务器端口
@@ -140,30 +139,6 @@ port-test -curl https://example.com -timeout 10
 > CURL 模式行为与 curl 一致：指定 `-d` 时自动使用 POST；不指定 `-d` 时 `-X POST` 也可强制 POST。
 > 参数可以放在 URL 后面（如 `-curl https://x.com -k -X POST -d 'a=1'`），与 curl 习惯一致。
 
-### SCAN 模式（端口扫描）
-
-```bash
-# 扫描常见端口（33 个常用服务端口）
-port-test -scan 10.0.0.1
-
-# 扫描指定范围
-port-test -scan 10.0.0.1 -p 1-1024
-
-# 全端口扫描
-port-test -scan 10.0.0.1 -p 1-65535 -timeout 1
-
-# 自定义端口
-port-test -scan 10.0.0.1 -p 80,443,3306,6379
-
-# 空格分隔端口
-port-test -scan 10.0.0.1 -p 80 443 3306 6379
-
-# JSON 输出（脚本解析）
-port-test -scan 10.0.0.1 -p 1-1024 -json-out
-```
-
-> 全端口扫描自动限制并发（最多 1024 同时探测），避免耗尽文件描述符。
-
 ### BENCH 模式（HTTP 压测）
 
 ```bash
@@ -264,14 +239,13 @@ port-test -traceroute example.com -m 20 -w 2
 
 ## 命令行参数
 
-### 模式开关（互斥，八选一）
+### 模式开关（互斥，七选一）
 
 | 参数 | 说明 |
 |------|------|
 | `-port <ports...>` | Port 模式：启动 HTTP 测试服务 |
 | `-tcping <targets...>` | TCPing 模式：TCP 端口连通性测试 |
 | `-curl <url>` | CURL 模式：模拟 curl 请求 |
-| `-scan <host>` | SCAN 模式：快速端口扫描 |
 | `-bench <url>` | BENCH 模式：轻量 HTTP 压测 |
 | `-udp <host:port>` | UDP 模式：UDP 连通性测试 |
 | `-dns <domain>` | DNS 模式：DNS 记录查询 |
@@ -283,8 +257,8 @@ port-test -traceroute example.com -m 20 -w 2
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-timeout` | `3` | 连接超时（秒，tcping/curl/scan/udp；traceroute 使用 `-w`） |
-| `-json-out` | `false` | JSON 输出（tcping/scan），便于脚本解析 |
+| `-timeout` | `3` | 连接超时（秒，tcping/curl/udp；traceroute 使用 `-w`） |
+| `-json-out` | `false` | JSON 输出（tcping），便于脚本解析 |
 | `-version` | - | 显示版本信息 |
 
 ### 退出码
@@ -293,7 +267,7 @@ port-test -traceroute example.com -m 20 -w 2
 |--------|------|
 | `0` | 成功 |
 | `1` | 参数/用法错误 |
-| `2` | 连接失败（curl 请求失败、scan/tcping 目标无法解析） |
+| `2` | 连接失败（curl 请求失败、tcping/udp 目标无法解析） |
 | `3` | 被中断/内部错误（端口占用、无权限等） |
 
 > 脚本可据此判断结果：如 `port-test -curl URL` 退出码 `2` 表示目标不可达。
@@ -302,7 +276,7 @@ port-test -traceroute example.com -m 20 -w 2
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-p` | `8080` | 端口号，逗号分隔（传统写法） |
+| `-p` | `8080` | 端口号，支持逗号分隔与范围写法（如 `8000-8010`，传统写法） |
 | `-code` | `200` | HTTP 状态码 |
 | `-json` | - | 自定义 JSON 响应 |
 | `-html` | - | HTML 文件路径 |
@@ -331,12 +305,6 @@ port-test -traceroute example.com -m 20 -w 2
 | `-n` | `100` | 总请求数（仅 bench） |
 | `-c` | `10` | 并发数（仅 bench） |
 | `-ka` | `false` | 复用连接 keep-alive（仅 bench，默认短连接） |
-
-### SCAN 模式
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `-p` | 常见端口表 | 扫描端口/范围（`1-1024`、`1-65535`） |
 
 ### UDP 模式
 

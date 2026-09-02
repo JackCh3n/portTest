@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,17 @@ import (
 	"testing"
 	"time"
 )
+
+// freePort 获取一个当前空闲的 TCP 端口, 避免固定端口被其他本地服务占用导致测试命中错误服务
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("获取空闲端口失败: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
 
 func TestParsePorts(t *testing.T) {
 	tests := []struct {
@@ -43,11 +56,12 @@ func TestServer(t *testing.T) {
 	// 测试默认 JSON 响应
 	config = Config{Code: 200}
 	jsonContent = []byte(`{"code":200,"msg":"hello"}`)
-	go startServer(18080)
+	port := freePort(t)
+	go startServer(port)
 	time.Sleep(100 * time.Millisecond)
 
 	// 测试根路径
-	resp, err := http.Get("http://localhost:18080/")
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
@@ -71,10 +85,11 @@ func TestServer(t *testing.T) {
 func TestHealthEndpoint(t *testing.T) {
 	config = Config{Code: 200}
 	jsonContent = []byte(`{"code":200,"msg":"hello"}`)
-	go startServer(18081)
+	port := freePort(t)
+	go startServer(port)
 	time.Sleep(100 * time.Millisecond)
 
-	resp, err := http.Get("http://localhost:18081/health")
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
@@ -104,7 +119,7 @@ func TestHTMLResponse(t *testing.T) {
 
 	// 设置配置
 	config = Config{
-		Ports: []int{18082},
+		Ports: []int{freePort(t)},
 		Code:  200,
 		HTML:  tmpFile.Name(),
 	}
@@ -117,10 +132,10 @@ func TestHTMLResponse(t *testing.T) {
 		w.Write(htmlContentBytes)
 	})
 
-	go http.ListenAndServe(":18082", mux)
+	go http.ListenAndServe(fmt.Sprintf(":%d", config.Ports[0]), mux)
 	time.Sleep(100 * time.Millisecond)
 
-	resp, err := http.Get("http://localhost:18082/")
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", config.Ports[0]))
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}

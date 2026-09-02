@@ -13,9 +13,10 @@ import (
 // UDP 无连接，检测原理：向目标发送 UDP 包并等待回包。
 // 若收到 ICMP Port Unreachable -> 端口关闭；收到回包 -> 端口开放；超时 -> 无法确认。
 // 用法:
-//   port-test -udp 10.0.0.1:53         测试 UDP 53 (DNS)
-//   port-test -udp 10.0.0.1 53,123     多端口
-//   port-test -udp 10.0.0.1:53 -timeout 5
+//
+//	port-test -udp 10.0.0.1:53         测试 UDP 53 (DNS)
+//	port-test -udp 10.0.0.1 53,123     多端口
+//	port-test -udp 10.0.0.1:53 -timeout 5
 func runUdpMode(posArgs []string, flagPorts string, timeoutSec int) {
 	if len(posArgs) == 0 {
 		fmt.Println("  错误: 请指定目标地址")

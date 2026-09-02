@@ -22,12 +22,13 @@ func (h *headerList) Set(val string) error {
 
 // runCurlMode 模拟 curl 发送 HTTP/HTTPS 请求并输出响应
 // 支持的写法:
-//   port-test -curl https://example.com                           GET 抓取
-//   port-test -curl https://example.com -k                        忽略 HTTPS 证书
-//   port-test -curl https://example.com -L                        跟随重定向
-//   port-test -curl https://api.com/login -X POST -d 'a=1&b=2'    POST 请求
-//   port-test -curl http://api.com/json -X POST -d '{"k":1}' -H 'Content-Type: application/json'
-//   port-test -curl http://api.com -H 'Authorization: Bearer xxx' 自定义请求头
+//
+//	port-test -curl https://example.com                           GET 抓取
+//	port-test -curl https://example.com -k                        忽略 HTTPS 证书
+//	port-test -curl https://example.com -L                        跟随重定向
+//	port-test -curl https://api.com/login -X POST -d 'a=1&b=2'    POST 请求
+//	port-test -curl http://api.com/json -X POST -d '{"k":1}' -H 'Content-Type: application/json'
+//	port-test -curl http://api.com -H 'Authorization: Bearer xxx' 自定义请求头
 func runCurlMode(posArgs []string, method, data string, headers headerList, insecure, followRedirect bool, timeoutSec int) {
 	// 校验 URL
 	if len(posArgs) == 0 {
@@ -76,6 +77,11 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 		}
 		key := strings.TrimSpace(h[:idx])
 		val := strings.TrimSpace(h[idx+1:])
+		if strings.EqualFold(key, "Host") {
+			// Go 忽略 Header 里的 Host, 覆盖请求 Host 必须设置 req.Host
+			req.Host = val
+			continue
+		}
 		req.Header.Set(key, val)
 	}
 
@@ -140,8 +146,8 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	}
 	defer resp.Body.Close()
 
-	// 读取响应体（限制 10MB，防止超大响应耗尽内存）
-	limitedBody := io.LimitReader(resp.Body, 10*1024*1024)
+	// 读取响应体（限制 10MB, 多读 1 字节用于精确判断是否截断, 防止超大响应耗尽内存）
+	limitedBody := io.LimitReader(resp.Body, 10*1024*1024+1)
 	respBody, err := io.ReadAll(limitedBody)
 	if err != nil {
 		fmt.Printf("  读取响应失败: %v\n", err)
@@ -163,8 +169,11 @@ func runCurlMode(posArgs []string, method, data string, headers headerList, inse
 	}
 	fmt.Println("  ------------------------------------")
 	fmt.Println("  响应体:")
-	fmt.Println(string(respBody))
-	if len(respBody) >= 10*1024*1024 {
+	if len(respBody) > 10*1024*1024 {
+		respBody = respBody[:10*1024*1024]
+		fmt.Println(string(respBody))
 		fmt.Println("  (响应体达到 10MB 上限, 已截断)")
+	} else {
+		fmt.Println(string(respBody))
 	}
 }

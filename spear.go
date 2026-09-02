@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -196,31 +195,31 @@ func pingPort(target string, port int, timeout time.Duration) PortResult {
 
 // 常见服务端口映射
 var commonServices = map[int]string{
-	21:   "FTP",
-	22:   "SSH",
-	23:   "Telnet",
-	25:   "SMTP",
-	53:   "DNS",
-	80:   "HTTP",
-	110:  "POP3",
-	143:  "IMAP",
-	443:  "HTTPS",
-	465:  "SMTPS",
-	587:  "SMTP",
-	993:  "IMAPS",
-	995:  "POP3S",
-	1080: "SOCKS",
-	1433: "MSSQL",
-	1521: "Oracle",
-	3306: "MySQL",
-	3389: "RDP",
-	5432: "PostgreSQL",
-	5900: "VNC",
-	6379: "Redis",
-	8080: "HTTP-Alt",
-	8443: "HTTPS-Alt",
-	9090: "HTTP-Alt",
-	9200: "Elasticsearch",
+	21:    "FTP",
+	22:    "SSH",
+	23:    "Telnet",
+	25:    "SMTP",
+	53:    "DNS",
+	80:    "HTTP",
+	110:   "POP3",
+	143:   "IMAP",
+	443:   "HTTPS",
+	465:   "SMTPS",
+	587:   "SMTP",
+	993:   "IMAPS",
+	995:   "POP3S",
+	1080:  "SOCKS",
+	1433:  "MSSQL",
+	1521:  "Oracle",
+	3306:  "MySQL",
+	3389:  "RDP",
+	5432:  "PostgreSQL",
+	5900:  "VNC",
+	6379:  "Redis",
+	8080:  "HTTP-Alt",
+	8443:  "HTTPS-Alt",
+	9090:  "HTTP-Alt",
+	9200:  "Elasticsearch",
 	11211: "Memcached",
 	27017: "MongoDB",
 }
@@ -259,48 +258,6 @@ func printResult(result ScanResult) {
 	fmt.Println("  ------------------------------------")
 	fmt.Printf("  总计: %d | 开放: %d | 关闭: %d | 耗时: %v\n",
 		result.Total, result.Success, result.Failed, result.TotalTime)
-}
-
-// QuickPing 快速检测（只输出关键信息，适合脚本调用）
-func QuickPing(target string, ports []int, timeout time.Duration) (int, []PortResult) {
-	results := make([]PortResult, 0, len(ports))
-	var successCount int32
-
-	var wg sync.WaitGroup
-	resultCh := make(chan PortResult, len(ports))
-
-	// 信号量限制并发（同 scanTarget）
-	sem := make(chan struct{}, maxScanConcurrency)
-
-	for _, port := range ports {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(p int) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			r := pingPort(target, p, timeout)
-			resultCh <- r
-		}(port)
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	for r := range resultCh {
-		results = append(results, r)
-		if r.Status == "open" {
-			atomic.AddInt32(&successCount, 1)
-		}
-	}
-
-	// 按端口排序, 保证输出顺序稳定
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Port < results[j].Port
-	})
-
-	return int(atomic.LoadInt32(&successCount)), results
 }
 
 // 解析端口范围，支持 "80,443" 和 "1-1024" 格式

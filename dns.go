@@ -11,9 +11,10 @@ import (
 
 // runDnsMode DNS 查询模式
 // 用法:
-//   port-test -dns example.com                    查询所有记录
-//   port-test -dns example.com -type A            仅查询 A 记录
-//   port-test -dns example.com -ip 8.8.8.8        指定 DNS 服务器
+//
+//	port-test -dns example.com                    查询所有记录
+//	port-test -dns example.com -type A            仅查询 A 记录
+//	port-test -dns example.com -ip 8.8.8.8        指定 DNS 服务器
 func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 	// 校验域名
 	if len(posArgs) == 0 {
@@ -39,8 +40,9 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 		resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				// network 由解析器决定 (udp/tcp): TCP 用于响应截断时的重试, 不能强制 udp
 				d := net.Dialer{Timeout: 5 * time.Second}
-				return d.DialContext(ctx, "udp", dnsAddr)
+				return d.DialContext(ctx, network, dnsAddr)
 			},
 		}
 	}
@@ -64,7 +66,9 @@ func runDnsMode(posArgs []string, dnsType, dnsServer string) {
 	}
 	fmt.Println("  ------------------------------------")
 
-	ctx := context.Background()
+	// 整体查询超时: 防止 DNS 服务器无响应时长时间挂起
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	query := func(label string, fn func() ([]string, error)) {
 		if !queryAll && dnsType != label {

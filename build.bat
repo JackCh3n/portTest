@@ -44,7 +44,7 @@ goto :done
 :default
 echo Building default targets: win-x86, linux-x86
 echo.
-call :build_one "win-x86"
+call :build_one "win-x64"
 call :build_one "linux-x86"
 goto :done
 

@@ -86,15 +86,3 @@ func TestGetServiceName(t *testing.T) {
 		}
 	}
 }
-
-func TestQuickPing(t *testing.T) {
-	ports := []int{80, 443, 8080}
-	success, results := QuickPing("127.0.0.1", ports, 3*time.Second)
-
-	if success < 0 || success > len(ports) {
-		t.Errorf("Success count = %d, want 0-%d", success, len(ports))
-	}
-	if len(results) != len(ports) {
-		t.Errorf("Results count = %d, want %d", len(results), len(ports))
-	}
-}

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"syscall"
@@ -54,38 +53,6 @@ func TestHandleEcho(t *testing.T) {
 	if headers["X-Test"] != "hello" {
 		t.Errorf("headers[X-Test] = %v, want hello", headers["X-Test"])
 	}
-}
-
-// TestScanCommonPorts 验证常见端口表完整性
-func TestScanCommonPorts(t *testing.T) {
-	if len(scanCommonPorts) < 20 {
-		t.Errorf("常见端口表过小: %d", len(scanCommonPorts))
-	}
-	// 必须包含关键端口
-	for _, p := range []int{22, 80, 443, 3306, 6379, 8080} {
-		found := false
-		for _, sp := range scanCommonPorts {
-			if sp == p {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("常见端口表缺少端口 %d", p)
-		}
-	}
-}
-
-// TestScanLocalOpenPort 验证扫描能发现本地开放端口
-func TestScanLocalOpenPort(t *testing.T) {
-	// 启动本地 HTTP 服务
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	}))
-	defer srv.Close()
-
-	// 扫描本地常见端口（不依赖特定端口，验证引擎可用性）
-	runScanMode([]string{"127.0.0.1"}, "", 2, false)
 }
 
 // TestRunUdpModeLocal 验证 UDP 探测逻辑（本地 UDP 服务）
@@ -146,6 +113,27 @@ func TestExtractTrailingFlagsNew(t *testing.T) {
 	}
 	if trHops != 15 {
 		t.Errorf("trHops = %d, want 15", trHops)
+	}
+}
+
+// TestExtractTrailingFlagsGnuStyle 验证 GNU 双横线风格的归一化
+// 注意: 后置 -h/--help(含归一化后的 --h)会直接 os.Exit(0), 无法在单测中覆盖
+func TestExtractTrailingFlagsGnuStyle(t *testing.T) {
+	var timeout, count int
+	timeout, count = 3, 1
+
+	rest := extractTrailingFlags([]string{"example.com", "--timeout", "8", "--zz"},
+		&flagOpts{timeout: &timeout, count: &count})
+
+	// "--timeout" 归一化为 "-timeout" 并取值; "--zz" 未定义, 保留为位置参数
+	if len(rest) != 2 || rest[0] != "example.com" || rest[1] != "--zz" {
+		t.Errorf("rest = %v, want [example.com --zz]", rest)
+	}
+	if timeout != 8 {
+		t.Errorf("timeout = %d, want 8", timeout)
+	}
+	if count != 1 {
+		t.Errorf("count = %d, want 1 (未被 --zz 污染)", count)
 	}
 }
 
@@ -416,8 +404,8 @@ func TestExtractTrailingFlagsXDH(t *testing.T) {
 	}
 }
 
-// TestScanResultsSorted 验证 scanTarget 结果按端口升序
-func TestScanResultsSorted(t *testing.T) {
+// TestTcpingResultsSorted 验证 tcping 探测结果按端口升序
+func TestTcpingResultsSorted(t *testing.T) {
 	// 本地启动服务提供开放端口
 	ports := []int{18121, 18120, 18122, 1}
 	result := scanTarget("127.0.0.1", ports, 500*time.Millisecond)
