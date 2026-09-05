@@ -63,7 +63,12 @@ port-test -port 8443 -tls-cert cert.pem -tls-key key.pem
 
 # 传统写法（-p 指定端口）
 port-test -p 8080,9090 -code 200
+
+# 传统写法（-p 范围写法）
+port-test -p 8000-8010
 ```
+
+> 按 `Ctrl+C` 优雅退出：收到中断信号会关闭所有服务器后正常退出（退出码 0）；端口被占用等启动失败则退出码 3。
 
 ### TCPing 模式
 
@@ -111,6 +116,8 @@ port-test -tcping 10.0.0.1:8080 -p 9090
 port-test -tcping 10.0.0.1:80,443 -json-out
 ```
 
+> 无效端口不会静默忽略：会打印 `警告: 忽略无效端口` 并继续；`-ip` 指定了主机但没有任何有效端口时直接报错（退出码 1）。
+
 ### CURL 模式
 
 ```bash
@@ -138,6 +145,8 @@ port-test -curl https://example.com -timeout 10
 
 > CURL 模式行为与 curl 一致：指定 `-d` 时自动使用 POST；不指定 `-d` 时 `-X POST` 也可强制 POST。
 > 参数可以放在 URL 后面（如 `-curl https://x.com -k -X POST -d 'a=1'`），与 curl 习惯一致。
+> `-H 'Host: example.com'` 可覆盖请求 Host（用于调试虚拟主机/反向代理场景）。
+> 所有 flag 支持双横线风格：`--timeout 10` 与 `-timeout 10` 等价；任意位置的 `-h`/`--help` 打印帮助并退出 0。
 
 ### BENCH 模式（HTTP 压测）
 
@@ -163,6 +172,7 @@ port-test -bench https://example.com -n 100 -c 10 -L
 
 输出：总请求 / 成功 / 失败 / 耗时 / QPS / 平均延迟 / P50 / P90 / P99。
 
+> QPS 按完成的请求数（成功 + 失败）÷ 总耗时计算，与主流压测工具口径一致；服务端大量 5xx 时不会低估实际吞吐。
 > 默认短连接（每次请求断开，更贴近真实场景）；加 `-ka` 复用连接性能更高。
 
 ### UDP 模式
@@ -192,6 +202,9 @@ port-test -dns example.com -ip 8.8.8.8
 # 指定 DNS 服务器（自定义端口）
 port-test -dns example.com -ip 8.8.8.8:5353
 ```
+
+> 整体查询限时 10 秒，超时的记录类型按失败输出，不会长时间挂起。
+> 自定义 DNS 服务器同时支持 UDP 与 TCP（响应截断时自动回退 TCP 重试）。
 
 ### TRACEROUTE 模式（路由追踪）
 
@@ -259,15 +272,18 @@ port-test -traceroute example.com -m 20 -w 2
 |------|--------|------|
 | `-timeout` | `3` | 连接超时（秒，tcping/curl/udp；traceroute 使用 `-w`） |
 | `-json-out` | `false` | JSON 输出（tcping），便于脚本解析 |
+| `-h` / `--help` | - | 显示帮助（任意位置均可，退出码 0） |
 | `-version` | - | 显示版本信息 |
+
+> 所有 flag 均支持 GNU 双横线风格（`--timeout` 等价 `-timeout`），包括 URL 之后的后置参数。
 
 ### 退出码
 
 | 退出码 | 含义 |
 |--------|------|
-| `0` | 成功 |
+| `0` | 成功（含 Port 模式 Ctrl+C 主动中断） |
 | `1` | 参数/用法错误 |
-| `2` | 连接失败（curl 请求失败、tcping/udp 目标无法解析） |
+| `2` | 连接失败（curl 请求失败、tcping/udp/traceroute 目标无法解析） |
 | `3` | 被中断/内部错误（端口占用、无权限等） |
 
 > 脚本可据此判断结果：如 `port-test -curl URL` 退出码 `2` 表示目标不可达。
@@ -351,9 +367,11 @@ port-test -traceroute example.com -m 20 -w 2
 ./build.sh list         # 查看支持的平台
 
 # Windows CMD
-build.bat               # 默认: win-x86 + linux-x86
+build.bat               # 默认: win-x64 + linux-x86
 build.bat all           # 全部平台
 ```
+
+> Windows 构建自动带版本信息：仓库内的 `port-test_windows_amd64.syso`（由 `versioninfo.rc` 生成）会被 `go build` 自动链入 win-amd64 产物，exe 文件属性显示产品名/版本/描述。修改版本号时同步更新 `versioninfo.rc` 与 `main.go` 中的 `version` 常量。
 
 ### CI 构建脚本
 
