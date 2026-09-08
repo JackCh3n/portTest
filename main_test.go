@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +146,77 @@ func TestHTMLResponse(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Test") {
 		t.Errorf("HTML 响应不包含预期内容")
+	}
+}
+
+// TestServerTimeoutsForLargeDownloads 验证大文件下载场景的超时配置
+// WriteTimeout 必须为 0: 它是请求头读完起算的绝对截止时间, 非零会中途掐断
+// 超过时限的大文件下载(如 1-4GB 内网分发)
+func TestServerTimeoutsForLargeDownloads(t *testing.T) {
+	srv := newServer(freePort(t))
+	if srv.WriteTimeout != 0 {
+		t.Errorf("WriteTimeout = %v, 应为 0 (非零会中断大文件下载)", srv.WriteTimeout)
+	}
+	if srv.ReadHeaderTimeout == 0 {
+		t.Error("ReadHeaderTimeout 应保留, 用于防慢速请求占用连接")
+	}
+	if srv.IdleTimeout == 0 {
+		t.Error("IdleTimeout 应保留, 用于回收空闲连接")
+	}
+}
+
+// TestStaticFileDownload 验证 -dir 静态目录下载: 完整下载 + Range 断点请求
+func TestStaticFileDownload(t *testing.T) {
+	dir := t.TempDir()
+	content := bytes.Repeat([]byte("A"), 100*1024)
+	if err := os.WriteFile(filepath.Join(dir, "test.bin"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 设置静态目录全局配置, 测试后还原
+	oldDir, oldValid := config.StaticDir, staticDirValid
+	config.StaticDir, staticDirValid = dir, true
+	defer func() { config.StaticDir, staticDirValid = oldDir, oldValid }()
+
+	port := freePort(t)
+	go startServer(port)
+	time.Sleep(100 * time.Millisecond)
+	base := fmt.Sprintf("http://localhost:%d", port)
+
+	// 完整下载, 内容必须一致
+	resp, err := http.Get(base + "/static/test.bin")
+	if err != nil {
+		t.Fatalf("下载失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("状态码 = %d, want 200", resp.StatusCode)
+	}
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("读取响应失败: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("下载内容不一致: got %d bytes, want %d", len(got), len(content))
+	}
+
+	// Range 断点请求: 206 + 精确分片
+	req, err := http.NewRequest("GET", base+"/static/test.bin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", "bytes=0-1023")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Range 请求失败: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 206 {
+		t.Errorf("Range 状态码 = %d, want 206", resp2.StatusCode)
+	}
+	b2, _ := io.ReadAll(resp2.Body)
+	if len(b2) != 1024 {
+		t.Errorf("Range 返回 %d bytes, want 1024", len(b2))
 	}
 }
 

@@ -684,12 +684,14 @@ func newServer(port int) *http.Server {
 	}
 
 	addr := fmt.Sprintf(":%d", port)
+	// WriteTimeout 必须保持为 0: 它是从请求头读完起算的绝对截止时间, 大文件
+	// 下载(1-4GB)超过 10s 会被中途掐断。防慢速请求占用连接由
+	// ReadHeaderTimeout(读头阶段) + ReadTimeout(读体阶段) + IdleTimeout(空闲) 兜底。
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 

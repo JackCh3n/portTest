@@ -66,9 +66,15 @@ port-test -p 8080,9090 -code 200
 
 # 传统写法（-p 范围写法）
 port-test -p 8000-8010
+
+# 临时文件下载站（内网分发大文件）
+port-test -dir D:\share -port 8080
+# 其他机器浏览器打开 http://<本机IP>:8080/static/ 浏览并下载
 ```
 
 > 按 `Ctrl+C` 优雅退出：收到中断信号会关闭所有服务器后正常退出（退出码 0）；端口被占用等启动失败则退出码 3。
+
+> `-dir` 挂载的静态目录支持 Range 断点续传（IDM/aria2/wget -c 多线程分块均可），流式传输不占内存，GB 级大文件无传输时限，可当内网临时文件下载站使用。
 
 ### TCPing 模式
 
@@ -296,7 +302,7 @@ port-test -traceroute example.com -m 20 -w 2
 | `-code` | `200` | HTTP 状态码 |
 | `-json` | - | 自定义 JSON 响应 |
 | `-html` | - | HTML 文件路径 |
-| `-dir` | - | 静态文件目录 |
+| `-dir` | - | 静态文件目录（挂载为 `/static/` 下载站，支持大文件与断点续传） |
 | `-tls-cert` | - | HTTPS 证书路径（与 -tls-key 同时指定） |
 | `-tls-key` | - | HTTPS 私钥路径 |
 
@@ -353,6 +359,7 @@ port-test -traceroute example.com -m 20 -w 2
 | `GET /health` | 健康检查，返回 `OK` |
 | `GET /info` | 服务信息（端口、状态码、时间戳） |
 | `* /echo` | 回显请求详情（method/path/query/headers/body），配合 curl 调试 |
+| `GET /static/*` | 静态文件下载（`-dir` 指定目录），支持 Range 断点续传，可分发 GB 级大文件 |
 
 ## 构建
 
