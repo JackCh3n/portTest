@@ -674,13 +674,22 @@ func parsePorts(s string) ([]int, error) {
 // newServer 创建单个 HTTP 服务器实例（不监听，返回后由调用方 ListenAndServe）
 func newServer(port int) *http.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleRoot)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/info", handleInfo)
 	mux.HandleFunc("/echo", handleEcho)
 
 	if config.StaticDir != "" && staticDirValid {
-		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(config.StaticDir))))
+		fileServer := http.FileServer(http.Dir(config.StaticDir))
+		mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+		// 下载站模式(-dir 且未指定自定义响应内容): 根路径直接给文件列表,
+		// 避免访问 /<文件名> 落到默认 JSON 收到 26 字节假文件
+		if config.HTML == "" && config.JSON == "" {
+			mux.Handle("/", fileServer)
+		} else {
+			mux.HandleFunc("/", handleRoot)
+		}
+	} else {
+		mux.HandleFunc("/", handleRoot)
 	}
 
 	addr := fmt.Sprintf(":%d", port)
@@ -801,6 +810,10 @@ func getResponseType() string {
 	}
 	if config.JSON != "" {
 		return "Custom JSON"
+	}
+	// -dir 下载站模式(无自定义 HTML/JSON): 根路径即文件列表
+	if config.StaticDir != "" && staticDirValid {
+		return "文件列表 (下载站)"
 	}
 	return "Default JSON"
 }

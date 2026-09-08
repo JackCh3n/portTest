@@ -173,10 +173,10 @@ func TestStaticFileDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 设置静态目录全局配置, 测试后还原
-	oldDir, oldValid := config.StaticDir, staticDirValid
-	config.StaticDir, staticDirValid = dir, true
-	defer func() { config.StaticDir, staticDirValid = oldDir, oldValid }()
+	// 重建全局 config(清掉其他测试遗留的 HTML/JSON 字段), 测试后还原
+	oldConfig, oldHTML, oldValid := config, htmlContent, staticDirValid
+	config, htmlContent, staticDirValid = Config{StaticDir: dir}, nil, true
+	defer func() { config, htmlContent, staticDirValid = oldConfig, oldHTML, oldValid }()
 
 	port := freePort(t)
 	go startServer(port)
@@ -217,6 +217,59 @@ func TestStaticFileDownload(t *testing.T) {
 	b2, _ := io.ReadAll(resp2.Body)
 	if len(b2) != 1024 {
 		t.Errorf("Range 返回 %d bytes, want 1024", len(b2))
+	}
+}
+
+// TestStaticDirRootListing 验证下载站模式: 根路径直接返回文件列表,
+// /static/ 与 /health 仍可用; 指定自定义 HTML 时根路径仍走 handleRoot
+func TestStaticDirRootListing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "test.bin"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldConfig, oldHTML, oldValid := config, htmlContent, staticDirValid
+	config, htmlContent, staticDirValid = Config{StaticDir: dir}, nil, true
+	defer func() { config, htmlContent, staticDirValid = oldConfig, oldHTML, oldValid }()
+
+	port := freePort(t)
+	go startServer(port)
+	time.Sleep(100 * time.Millisecond)
+	base := fmt.Sprintf("http://localhost:%d", port)
+
+	// 根路径应为文件列表(包含文件名链接), 而非默认 JSON
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), `"code":200`) {
+		t.Error("根路径返回了默认 JSON, 应为文件列表")
+	}
+	if !strings.Contains(string(body), "test.bin") {
+		t.Errorf("根路径列表未包含文件名 test.bin, body: %.200s", body)
+	}
+
+	// /static/ 路径仍可用
+	resp2, err := http.Get(base + "/static/test.bin")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Errorf("/static/ 状态码 = %d, want 200", resp2.StatusCode)
+	}
+
+	// /health 不受影响
+	resp3, err := http.Get(base + "/health")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	defer resp3.Body.Close()
+	b3, _ := io.ReadAll(resp3.Body)
+	if string(b3) != "OK" {
+		t.Errorf("/health = %q, want OK", b3)
 	}
 }
 
