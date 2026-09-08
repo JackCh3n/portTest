@@ -1,10 +1,11 @@
 @echo off
 REM Build script for Port Test Tool (Windows version)
-REM Default: win-x86 + linux-x86
+REM Default: win-x86 + linux-x86 + linux-arm64
 REM Usage:
-REM   build.bat              REM build default: win-x86 + linux-x86
+REM   build.bat              REM build default: win-x86 + linux-x86 + linux-arm64
 REM   build.bat win-x86      REM build win-x86 only
 REM   build.bat linux-x86    REM build linux-x86 only
+REM   build.bat linux-arm64  REM build linux-arm64 only (Kunpeng etc. ARM64)
 REM   build.bat win          REM build all windows
 REM   build.bat linux        REM build all linux
 REM   build.bat all          REM build all platforms
@@ -42,10 +43,11 @@ call :build_one "%TARGET%"
 goto :done
 
 :default
-echo Building default targets: win-x86, linux-x86
+echo Building default targets: win-x86, linux-x86, linux-arm64
 echo.
-call :build_one "win-x64"
+call :build_one "win-x86"
 call :build_one "linux-x86"
+call :build_one "linux-arm64"
 goto :done
 
 :all
@@ -260,7 +262,7 @@ echo     openbsd      all OpenBSD platforms
 echo     all          all platforms above
 echo.
 echo Usage examples:
-echo   build.bat                    default: win-x86 + linux-x86
+echo   build.bat                    default: win-x86 + linux-x86 + linux-arm64
 echo   build.bat win-x86            single target
 echo   build.bat win                all windows
 echo   build.bat all                everything

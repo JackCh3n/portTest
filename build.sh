@@ -1,10 +1,11 @@
 #!/bin/bash
 # Build script for Port Test Tool
-# Default: win-x86 + linux-x86
+# Default: win-x86 + linux-x86 + linux-arm64
 # Usage:
-#   ./build.sh              # build default: win-x86 + linux-x86
+#   ./build.sh              # build default: win-x86 + linux-x86 + linux-arm64
 #   ./build.sh win-x86      # build win-x86 only
 #   ./build.sh linux-x86    # build linux-x86 only
+#   ./build.sh linux-arm64  # build linux-arm64 only (Kunpeng/飞腾等国产 ARM64)
 #   ./build.sh win          # build all windows (x86 + x64 + arm64)
 #   ./build.sh linux        # build all linux (x86 + x64 + arm64 + arm)
 #   ./build.sh darwin       # build all macos (x64 + arm64)
@@ -96,7 +97,7 @@ list_platforms() {
   echo "    all          all platforms above"
   echo ""
   echo "Usage examples:"
-  echo "  ./build.sh                    # default: win-x86 + linux-x86"
+  echo "  ./build.sh                    # default: win-x86 + linux-x86 + linux-arm64"
   echo "  ./build.sh win-x86            # single target"
   echo "  ./build.sh win                # all windows"
   echo "  ./build.sh all                # everything"
@@ -120,10 +121,11 @@ case "$TARGET" in
     exit 0
     ;;
   default)
-    echo "Building default targets: win-x86, linux-x86"
+    echo "Building default targets: win-x86, linux-x86, linux-arm64"
     echo ""
     build_label "win-x86"
     build_label "linux-x86"
+    build_label "linux-arm64"
     ;;
   all)
     echo "Building ALL platforms..."

@@ -367,14 +367,14 @@ port-test -traceroute example.com -m 20 -w 2
 
 ```bash
 # Linux / macOS / Git Bash
-./build.sh              # 默认: win-x86 + linux-x86
+./build.sh              # 默认: win-x86 + linux-x86 + linux-arm64
 ./build.sh win          # 所有 Windows 平台
 ./build.sh linux        # 所有 Linux 平台
 ./build.sh all          # 全部 17 种平台
 ./build.sh list         # 查看支持的平台
 
 # Windows CMD
-build.bat               # 默认: win-x64 + linux-x86
+build.bat               # 默认: win-x86 + linux-x86 + linux-arm64
 build.bat all           # 全部平台
 ```
 
