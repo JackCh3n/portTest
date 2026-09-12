@@ -38,7 +38,7 @@ go install github.com/JackCh3n/portTest@latest
 
 **方式三：源码构建**
 
-详见下方「构建」章节。当前版本：`v1.1.1`（运行 `port-test -version` 查看）。
+详见下方「构建」章节。当前版本：`v1.2.0`（运行 `port-test -version` 查看）。
 
 ### Port 模式
 
@@ -389,7 +389,7 @@ build.bat               # 默认: win-x86 + linux-x86 + linux-arm64
 build.bat all           # 全部平台
 ```
 
-> Windows 构建自动带版本信息：仓库内的 `port-test_windows_amd64.syso`（由 `versioninfo.rc` 生成）会被 `go build` 自动链入 win-amd64 产物，exe 文件属性显示产品名/版本/描述。修改版本号时同步更新 `versioninfo.rc` 与 `main.go` 中的 `version` 常量。
+> Windows 构建自动带版本信息：仓库内按架构提供的 `port-test_windows_386.syso` / `port-test_windows_amd64.syso`（由 `versioninfo.rc` 经 windres 生成）会被 `go build` 自动链入对应架构的 Windows 产物，exe 文件属性显示产品名/版本/描述。win/arm64 暂无 syso（工具链限制）不带版本属性。生成命令：`windres -O coff -F pe-i386 versioninfo.rc port-test_windows_386.syso`（amd64 用 `-F pe-x86-64`）。修改版本号时同步更新 `versioninfo.rc`、`main.go` 中的 `version` 常量并重新生成对应 syso。
 
 ### CI 构建脚本
 
