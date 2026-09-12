@@ -41,7 +41,7 @@ type JSONResponse struct {
 	Msg  string `json:"msg"`
 }
 
-const version = "1.1.0"
+const version = "1.1.1"
 
 // 退出码语义化，便于脚本根据退出码判断结果
 const (

@@ -38,7 +38,7 @@ go install github.com/JackCh3n/portTest@latest
 
 **方式三：源码构建**
 
-详见下方「构建」章节。当前版本：`v1.1.0`（运行 `port-test -version` 查看）。
+详见下方「构建」章节。当前版本：`v1.1.1`（运行 `port-test -version` 查看）。
 
 ### Port 模式
 
@@ -446,6 +446,18 @@ go test -v ./...
 | Linux | x86 / x64 / ARM / ARM64 / MIPS / MIPSLE / MIPS64 / MIPS64LE / LoongArch | `port-test-linux-amd64` |
 | macOS | x64 / ARM64 | `port-test-darwin-arm64` |
 | FreeBSD / OpenBSD | x64 / ARM64 | `port-test-freebsd-amd64` |
+
+## 版本规则
+
+版本号格式 `主版本.次版本.修订号`（如 `1.1.1`），从 `1.0.0` 起算：
+
+| 变更类型 | 递增幅度 | 示例 |
+|---------|---------|------|
+| 重大版本（架构重构/重量级功能改版） | 主版本 +1，如 `1.x.x → 2.0.0` | 新增重量级模式 |
+| 漏洞修复/安全修复之类 | 次版本 +0.1，如 `1.1.x → 1.2.0` | 安全加固 |
+| 常规提交（功能/文档/小改动，1 次提交） | 修订号 +0.0.1，如 `1.1.0 → 1.1.1` | 日常变更 |
+
+每次变更提交时需同步更新三处：`main.go` 的 `version` 常量、`versioninfo.rc` 的 FILEVERSION/PRODUCTVERSION、README 此处的当前版本号。
 
 ## License
 
