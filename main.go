@@ -72,8 +72,9 @@ func printUsage() {
 	fmt.Println("    port-test -traceroute <主机>   路由追踪")
 	fmt.Println()
 	fmt.Println("  Port 模式:")
-	fmt.Println("    port-test                                    下载站(随机端口+本目录)")
-	fmt.Println("    port-test -port 8080                          指定端口")
+	fmt.Println("    port-test -dir                                下载站(缺省共享本目录+随机端口)")
+	fmt.Println("    port-test -dir D:\\share -port 8080            下载站(指定目录与端口)")
+	fmt.Println("    port-test -port 8080                          测试服务: 指定端口")
 	fmt.Println("    port-test -port 8080 9090                     多个端口")
 	fmt.Println("    port-test -p 8080,9090                        用 -p 指定多个端口")
 	fmt.Println("    port-test -p 8080 -code 403                   指定状态码")
@@ -200,7 +201,9 @@ func main() {
 	showVersion := flag.Bool("version", false, "显示版本信息")
 	// 解析失败: -h/--help 属于正常帮助请求退出 0, 其余按文档语义退出 1
 	// (ContinueOnError 模式下需调用 CommandLine.Parse 才能拿到错误)
-	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+	// 解析前预处理: 孤立的 -dir (后面无值或下一个参数是 flag) 展开为 -dir=<二进制所在目录>,
+	// 使 "port-test -dir" 即可启动下载站
+	if err := flag.CommandLine.Parse(preprocessDirFlag(os.Args[1:])); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
@@ -268,11 +271,19 @@ func main() {
 		*interval = 0
 	}
 
-	// 默认 port 模式(无论是否带参数):
-	//   完全无参数 -> 下载站(随机端口 + 二进制所在目录), 便携场景拷过去直接运行即可分享
-	//   带 -p/-code 等参数或位置参数 -> 按参数执行
-	// 查看帮助用 -h/--help
+	// 默认 port 模式(兼容旧用法: 只带 -p/-code 等参数时)
+	// 完全无参数时显示帮助; -dir 是下载站触发开关, 即使无其他参数也进入 port 模式
+	dirSet := false
+	flag.CommandLine.Visit(func(f *flag.Flag) {
+		if f.Name == "dir" {
+			dirSet = true
+		}
+	})
 	if !*usePort && !*useTcping && !*useCurl && !*useBench && !*useUdp && !*useDns && !*useTraceroute {
+		if len(posArgs) == 0 && *portStr == "" && *target == "" && !dirSet {
+			printUsage()
+			os.Exit(0)
+		}
 		*usePort = true
 	}
 
@@ -520,9 +531,14 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		ports = parsed
 	}
 
-	// 默认端口: 未指定时随机(端口 0, 由操作系统分配, 启动后显示实际端口)
+	// 默认端口: -dir 下载站模式缺省随机(端口 0, 由操作系统分配);
+	// 普通测试服务保持默认 8080
 	if len(ports) == 0 {
-		ports = []int{0}
+		if staticDir != "" {
+			ports = []int{0}
+		} else {
+			ports = []int{8080}
+		}
 	}
 
 	// 校验 HTTP 状态码（Go 要求 100-999，否则 WriteHeader panic）
@@ -571,13 +587,9 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		fmt.Printf("  已加载 HTML 文件: %s\n", config.HTML)
 	}
 
-	// 裸 port 模式(未指定 -dir/-html/-json): 默认共享二进制所在目录, 充当临时下载站;
-	// 指定了 -html/-json 的测试服务场景不自动挂目录, 避免悄悄暴露运行目录
-	if config.StaticDir == "" && config.HTML == "" && config.JSON == "" {
-		config.StaticDir = defaultStaticDir()
-	}
-
 	// 校验静态目录（一次性，避免多端口重复打印）
+	// 注: 孤立的 -dir 已由 preprocessDirFlag 展开为二进制所在目录, 只有无 -dir
+	// 且无 -html/-json 的普通测试服务才会保持 StaticDir 为空
 	if config.StaticDir != "" {
 		if info, err := os.Stat(config.StaticDir); err == nil && info.IsDir() {
 			staticDirValid = true
@@ -703,6 +715,26 @@ func defaultStaticDir() string {
 		return wd
 	}
 	return ""
+}
+
+// preprocessDirFlag 预处理孤立的 -dir 参数:
+// "port-test -dir" 这种 -dir 后无值(或下一个参数是 flag)的写法,
+// 展开为 -dir=<二进制所在目录>, 使其直接触发下载站模式
+func preprocessDirFlag(args []string) []string {
+	def := ""
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if (a == "-dir" || a == "--dir") && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")) {
+			if def == "" {
+				def = defaultStaticDir()
+			}
+			out = append(out, "-dir="+def)
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // newServer 创建单个 HTTP 服务器实例（不监听，返回后由调用方 ListenAndServe）
@@ -1078,6 +1110,13 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 
 		// 值 flag: 需要下一个参数作为值
 		if fn, ok := valueFlags[norm]; ok {
+			// -dir 特殊: 孤立使用(无值或下一个参数是 flag)时默认共享二进制所在目录
+			if norm == "-dir" && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")) {
+				if opts.staticDir != nil {
+					*opts.staticDir = defaultStaticDir()
+				}
+				continue
+			}
 			if i+1 < len(args) {
 				fn(args[i+1])
 				i++

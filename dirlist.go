@@ -110,7 +110,9 @@ footer{margin-top:16px;font-size:12px;color:#8b949e}
 			}
 			mod = info.ModTime().Format("2006-01-02 15:04")
 		}
-		b.WriteString(`<tr><td class="name"><a class="`)
+		b.WriteString(`<tr><td class="name">`)
+		b.WriteString(fileIcon(name, e.IsDir()))
+		b.WriteString(` <a class="`)
 		if e.IsDir() {
 			b.WriteString("dir")
 		}
@@ -148,4 +150,43 @@ func formatBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// fileIcon 按文件后缀返回 emoji 图标, 纯文本实现无需额外资源
+func fileIcon(name string, isDir bool) string {
+	if isDir {
+		return "📁"
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico":
+		return "🖼️"
+	case ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v":
+		return "🎬"
+	case ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma":
+		return "🎵"
+	case ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".iso", ".img":
+		return "📦"
+	case ".pdf":
+		return "📕"
+	case ".doc", ".docx":
+		return "📘"
+	case ".xls", ".xlsx", ".csv":
+		return "📊"
+	case ".ppt", ".pptx":
+		return "📙"
+	case ".exe", ".msi", ".apk", ".dmg", ".deb", ".rpm", ".appimage":
+		return "⚙️"
+	case ".bin", ".so", ".dll", ".dylib":
+		return "🔧"
+	case ".go", ".py", ".js", ".ts", ".c", ".h", ".cpp", ".java", ".rs", ".sh", ".bat", ".ps1":
+		return "💻"
+	case ".html", ".css", ".xml", ".json", ".yml", ".yaml", ".toml", ".ini", ".conf":
+		return "🧾"
+	case ".md", ".txt", ".log":
+		return "📝"
+	case ".sql", ".db", ".sqlite":
+		return "🗄️"
+	default:
+		return "📄"
+	}
 }

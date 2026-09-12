@@ -297,7 +297,7 @@ func TestDirListHandlerHTML(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	s := string(body)
-	for _, want := range []string{"Index of /", "hello.txt", `href="sub%20dir/"`, "2 B", "Modified"} {
+	for _, want := range []string{"Index of /", "📝 <a", ">hello.txt<", "📁 <a", `href="sub%20dir/"`, "2 B", "Modified"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("列表页缺少 %q", want)
 		}
@@ -371,6 +371,59 @@ func TestDefaultStaticDir(t *testing.T) {
 	}
 	if info, err := os.Stat(d); err != nil || !info.IsDir() {
 		t.Errorf("defaultStaticDir() = %q, 不是有效目录", d)
+	}
+}
+
+// TestFileIcon 验证常见后缀的图标映射
+func TestFileIcon(t *testing.T) {
+	tests := []struct {
+		name  string
+		isDir bool
+		want  string
+	}{
+		{"photos", true, "📁"},
+		{"photo.jpg", false, "🖼️"},
+		{"movie.mp4", false, "🎬"},
+		{"song.mp3", false, "🎵"},
+		{"archive.zip", false, "📦"},
+		{"doc.pdf", false, "📕"},
+		{"app.exe", false, "⚙️"},
+		{"main.go", false, "💻"},
+		{"notes.txt", false, "📝"},
+		{"unknown.xyz", false, "📄"},
+		{"NOEXT", false, "📄"},
+		{"UPPER.JPG", false, "🖼️"},
+	}
+	for _, tt := range tests {
+		if got := fileIcon(tt.name, tt.isDir); got != tt.want {
+			t.Errorf("fileIcon(%q, %v) = %q, want %q", tt.name, tt.isDir, got, tt.want)
+		}
+	}
+}
+
+// TestPreprocessDirFlag 验证孤立 -dir 展开为二进制所在目录
+func TestPreprocessDirFlag(t *testing.T) {
+	want := "-dir=" + defaultStaticDir()
+
+	// 孤立 -dir (末尾) -> 展开
+	got := preprocessDirFlag([]string{"-dir"})
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("preprocessDirFlag([-dir]) = %v, want [%s]", got, want)
+	}
+	// 孤立 --dir (下一个是 flag) -> 展开
+	got = preprocessDirFlag([]string{"--dir", "-port", "8080"})
+	if len(got) != 3 || got[0] != want {
+		t.Errorf("preprocessDirFlag([--dir -port 8080]) = %v, want [%s -port 8080]", got, want)
+	}
+	// 带值的 -dir 原样保留
+	got = preprocessDirFlag([]string{"-dir", "/tmp/share"})
+	if len(got) != 2 || got[0] != "-dir" || got[1] != "/tmp/share" {
+		t.Errorf("带值 -dir 被误改: %v", got)
+	}
+	// 无关参数不受影响
+	got = preprocessDirFlag([]string{"-port", "8080", "-dir=x"})
+	if len(got) != 3 || got[2] != "-dir=x" {
+		t.Errorf("无关参数被误改: %v", got)
 	}
 }
 
