@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -70,6 +72,7 @@ func printUsage() {
 	fmt.Println("    port-test -traceroute <主机>   路由追踪")
 	fmt.Println()
 	fmt.Println("  Port 模式:")
+	fmt.Println("    port-test                                    下载站(随机端口+本目录)")
 	fmt.Println("    port-test -port 8080                          指定端口")
 	fmt.Println("    port-test -port 8080 9090                     多个端口")
 	fmt.Println("    port-test -p 8080,9090                        用 -p 指定多个端口")
@@ -265,14 +268,11 @@ func main() {
 		*interval = 0
 	}
 
-	// 无任何模式开关且无位置参数时显示帮助
-	// 兼容旧用法: 只带 -p/-code 等参数时默认走 port 模式
+	// 默认 port 模式(无论是否带参数):
+	//   完全无参数 -> 下载站(随机端口 + 二进制所在目录), 便携场景拷过去直接运行即可分享
+	//   带 -p/-code 等参数或位置参数 -> 按参数执行
+	// 查看帮助用 -h/--help
 	if !*usePort && !*useTcping && !*useCurl && !*useBench && !*useUdp && !*useDns && !*useTraceroute {
-		if len(posArgs) == 0 && *portStr == "" && *target == "" {
-			printUsage()
-			os.Exit(0)
-		}
-		// 旧用法默认 port 模式
 		*usePort = true
 	}
 
@@ -520,9 +520,9 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		ports = parsed
 	}
 
-	// 默认 8080
+	// 默认端口: 未指定时随机(端口 0, 由操作系统分配, 启动后显示实际端口)
 	if len(ports) == 0 {
-		ports = []int{8080}
+		ports = []int{0}
 	}
 
 	// 校验 HTTP 状态码（Go 要求 100-999，否则 WriteHeader panic）
@@ -571,6 +571,12 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		fmt.Printf("  已加载 HTML 文件: %s\n", config.HTML)
 	}
 
+	// 裸 port 模式(未指定 -dir/-html/-json): 默认共享二进制所在目录, 充当临时下载站;
+	// 指定了 -html/-json 的测试服务场景不自动挂目录, 避免悄悄暴露运行目录
+	if config.StaticDir == "" && config.HTML == "" && config.JSON == "" {
+		config.StaticDir = defaultStaticDir()
+	}
+
 	// 校验静态目录（一次性，避免多端口重复打印）
 	if config.StaticDir != "" {
 		if info, err := os.Stat(config.StaticDir); err == nil && info.IsDir() {
@@ -592,7 +598,11 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 	}
 
 	// 打印启动信息
-	fmt.Printf("  端口: %v\n", config.Ports)
+	if len(config.Ports) == 1 && config.Ports[0] == 0 {
+		fmt.Println("  端口: 随机 (启动后显示实际端口)")
+	} else {
+		fmt.Printf("  端口: %v\n", config.Ports)
+	}
 	fmt.Printf("  状态码: %d\n", config.Code)
 	fmt.Printf("  协议: %s\n", getProtocol())
 	fmt.Printf("  响应类型: %s\n", getResponseType())
@@ -608,17 +618,30 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 		srv := newServer(port)
 		servers = append(servers, srv)
 
-		go func(s *http.Server) {
+		// 先 Listen 再 Serve: 端口 0 时由操作系统随机分配, 并把实际端口打印出来
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			serverErr <- fmt.Errorf("端口 %d 监听失败: %v", port, err)
+			continue
+		}
+		actual := ln.Addr().(*net.TCPAddr).Port
+		if port == 0 {
+			fmt.Printf("  服务器启动: %s://localhost:%d (随机)\n", getProtocol(), actual)
+		} else {
+			fmt.Printf("  服务器启动: %s://localhost:%d\n", getProtocol(), actual)
+		}
+
+		go func(s *http.Server, l net.Listener, p int) {
 			var err error
 			if config.TLSCert != "" {
-				err = s.ListenAndServeTLS(config.TLSCert, config.TLSKey)
+				err = s.ServeTLS(l, config.TLSCert, config.TLSKey)
 			} else {
-				err = s.ListenAndServe()
+				err = s.Serve(l)
 			}
 			if err != nil && err != http.ErrServerClosed {
-				serverErr <- fmt.Errorf("端口 %s 启动失败: %v", strings.TrimPrefix(s.Addr, ":"), err)
+				serverErr <- fmt.Errorf("端口 %d 启动失败: %v", p, err)
 			}
-		}(srv)
+		}(srv, ln, actual)
 	}
 
 	// 等待任一 server 出错（正常运行时会一直阻塞在此）或用户中断
@@ -671,6 +694,17 @@ func parsePorts(s string) ([]int, error) {
 	return ports, nil
 }
 
+// defaultStaticDir 返回下载站默认共享目录: 二进制可执行文件所在目录, 失败时退回工作目录
+func defaultStaticDir() string {
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Dir(exe)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return ""
+}
+
 // newServer 创建单个 HTTP 服务器实例（不监听，返回后由调用方 ListenAndServe）
 func newServer(port int) *http.Server {
 	mux := http.NewServeMux()
@@ -679,12 +713,12 @@ func newServer(port int) *http.Server {
 	mux.HandleFunc("/echo", handleEcho)
 
 	if config.StaticDir != "" && staticDirValid {
-		fileServer := http.FileServer(http.Dir(config.StaticDir))
-		mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+		filesys := http.Dir(config.StaticDir)
+		mux.Handle("/static/", http.StripPrefix("/static/", makeStaticFileHandler(filesys, "/static")))
 		// 下载站模式(-dir 且未指定自定义响应内容): 根路径直接给文件列表,
 		// 避免访问 /<文件名> 落到默认 JSON 收到 26 字节假文件
 		if config.HTML == "" && config.JSON == "" {
-			mux.Handle("/", fileServer)
+			mux.Handle("/", makeStaticFileHandler(filesys, ""))
 		} else {
 			mux.HandleFunc("/", handleRoot)
 		}
@@ -704,7 +738,6 @@ func newServer(port int) *http.Server {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	fmt.Printf("  服务器启动: %s://localhost:%d\n", getProtocol(), port)
 	return server
 }
 

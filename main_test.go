@@ -273,6 +273,107 @@ func TestStaticDirRootListing(t *testing.T) {
 	}
 }
 
+// TestDirListHandlerHTML 验证 nginx 风格目录列表页: 文件/子目录/父链接/大小,
+// 文件请求透传 FileServer(保留 Range), 路径转义
+func TestDirListHandlerHTML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub dir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(makeStaticFileHandler(http.Dir(dir), ""))
+	defer srv.Close()
+
+	// 目录列表页: HTML + 文件名 + 子目录 + 大小 + 父目录链接
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, 应为 text/html", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	for _, want := range []string{"Index of /", "hello.txt", `href="sub%20dir/"`, "2 B", "Modified"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("列表页缺少 %q", want)
+		}
+	}
+	// 根路径不应有父目录链接
+	if strings.Contains(s, `href="../"`) {
+		t.Error("根路径不应显示 ../ 链接")
+	}
+
+	// 子目录列表(含空格的目录名, 验证相对链接可访问 + 父目录链接)
+	resp2, err := http.Get(srv.URL + "/sub dir/")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Errorf("子目录状态码 = %d, want 200", resp2.StatusCode)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	if !strings.Contains(string(body2), `href="../"`) {
+		t.Error("子目录页缺少 ../ 父目录链接")
+	}
+
+	// 文件请求透传 FileServer: 内容一致 + Range 206
+	resp3, err := http.Get(srv.URL + "/hello.txt")
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	defer resp3.Body.Close()
+	b3, _ := io.ReadAll(resp3.Body)
+	if string(b3) != "hi" {
+		t.Errorf("文件内容 = %q, want hi", b3)
+	}
+	req, _ := http.NewRequest("GET", srv.URL+"/hello.txt", nil)
+	req.Header.Set("Range", "bytes=0-0")
+	resp4, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Range 请求失败: %v", err)
+	}
+	defer resp4.Body.Close()
+	if resp4.StatusCode != 206 {
+		t.Errorf("Range 状态码 = %d, want 206", resp4.StatusCode)
+	}
+}
+
+// TestFormatBytes 验证字节数人性化显示
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1024 * 1024, "1.0 MB"},
+		{int64(1.5 * 1024 * 1024 * 1024), "1.5 GB"},
+	}
+	for _, tt := range tests {
+		if got := formatBytes(tt.n); got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+// TestDefaultStaticDir 验证默认共享目录为二进制所在目录且存在
+func TestDefaultStaticDir(t *testing.T) {
+	d := defaultStaticDir()
+	if d == "" {
+		t.Fatal("defaultStaticDir() 为空")
+	}
+	if info, err := os.Stat(d); err != nil || !info.IsDir() {
+		t.Errorf("defaultStaticDir() = %q, 不是有效目录", d)
+	}
+}
+
 func TestGetResponseType(t *testing.T) {
 	// 默认 JSON
 	config = Config{}
