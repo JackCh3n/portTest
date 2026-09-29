@@ -84,6 +84,10 @@ a{color:#0969da;text-decoration:none}
 a:hover{text-decoration:underline}
 a.dir::after{content:"/";color:#8b949e}
 footer{margin-top:16px;font-size:12px;color:#8b949e}
+.ops{white-space:nowrap;text-align:right;width:170px}
+.ops button{font:12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:#57606a;background:#f6f8fa;border:1px solid #d8dee4;border-radius:4px;padding:2px 7px;cursor:pointer;margin-left:4px}
+.ops button:hover{color:#0969da;border-color:#0969da;background:#fff}
+.ops button.ok{color:#1a7f37;border-color:#1a7f37}
 </style>
 </head>
 <body>
@@ -91,7 +95,7 @@ footer{margin-top:16px;font-size:12px;color:#8b949e}
 	b.WriteString(html.EscapeString(urlPrefix + dirPath))
 	b.WriteString(`</h1>
 <table>
-<tr><th style="width:60%">Name</th><th class="num">Size</th><th class="num" style="width:150px">Modified</th></tr>
+<tr><th style="width:50%">Name</th><th class="num">Size</th><th class="num" style="width:145px">Modified</th><th class="ops">Copy</th></tr>
 `)
 	// 非根目录显示返回上级
 	if dirPath != "/" {
@@ -124,12 +128,63 @@ footer{margin-top:16px;font-size:12px;color:#8b949e}
 		b.WriteString(size)
 		b.WriteString(`</td><td class="num">`)
 		b.WriteString(mod)
-		b.WriteString("</td></tr>")
+		b.WriteString(`</td>`)
+		if e.IsDir() {
+			b.WriteString(`<td class="ops"></td>`)
+		} else {
+			// 一键复制: curl 下载 / wget 下载 / 下载并运行; 命令由前端按当前访问地址生成
+			b.WriteString(`<td class="ops">`)
+			for _, k := range []string{"curl", "wget", "run"} {
+				b.WriteString(`<button type="button" title="复制 `)
+				switch k {
+				case "curl":
+					b.WriteString(`curl 下载命令`)
+				case "wget":
+					b.WriteString(`wget 下载命令`)
+				case "run":
+					b.WriteString(`下载并运行命令(curl+chmod+执行)`)
+				}
+				b.WriteString(`" onclick="cp(this,'`)
+				b.WriteString(k)
+				b.WriteString(`')">`)
+				b.WriteString(k)
+				b.WriteString("</button>")
+			}
+			b.WriteString(`</td>`)
+		}
+		b.WriteString("</tr>")
 	}
 	b.WriteString(`</table>
 <footer>port-test v`)
 	b.WriteString(version)
 	b.WriteString(` download station</footer>
+<script>
+function shq(s){return "'"+String(s).replace(/'/g,"'\\''")+"'";}
+function doCopy(t){
+  if(navigator.clipboard&&window.isSecureContext){return navigator.clipboard.writeText(t);}
+  var ta=document.createElement('textarea');
+  ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  var ok=false;try{ok=document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);
+  return ok?Promise.resolve():Promise.reject();
+}
+function cp(btn,kind){
+  var a=btn.closest('tr').querySelector('td.name a');
+  var raw=a.getAttribute('href').split('/').pop();
+  var name;try{name=decodeURIComponent(raw);}catch(e){name=raw;}
+  var url=new URL(a.getAttribute('href'),location.href).href;
+  var q=shq,cmd;
+  if(kind==='curl')cmd='curl -f -o '+q(name)+' '+q(url);
+  else if(kind==='wget')cmd='wget -O '+q(name)+' '+q(url);
+  else cmd='curl -f -o '+q(name)+' '+q(url)+' && chmod +x '+q(name)+' && '+q('./'+name);
+  doCopy(cmd).then(function(){done(btn);},function(){prompt('复制失败, 请手动复制:',cmd);});
+}
+function done(btn){
+  var t=btn.textContent;btn.textContent='✓';btn.classList.add('ok');
+  setTimeout(function(){btn.textContent=t;btn.classList.remove('ok');},1200);
+}
+</script>
 </body>
 </html>`)
 

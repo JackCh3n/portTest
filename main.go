@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +42,7 @@ type JSONResponse struct {
 	Msg  string `json:"msg"`
 }
 
-const version = "1.2.0"
+const version = "1.2.1"
 
 // 退出码语义化，便于脚本根据退出码判断结果
 const (
@@ -637,11 +638,7 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 			continue
 		}
 		actual := ln.Addr().(*net.TCPAddr).Port
-		if port == 0 {
-			fmt.Printf("  服务器启动: %s://localhost:%d (随机)\n", getProtocol(), actual)
-		} else {
-			fmt.Printf("  服务器启动: %s://localhost:%d\n", getProtocol(), actual)
-		}
+		printListenAddrs(actual)
 
 		go func(s *http.Server, l net.Listener, p int) {
 			var err error
@@ -704,6 +701,56 @@ func parsePorts(s string) ([]int, error) {
 	}
 
 	return ports, nil
+}
+
+// localIP 本机 IPv4 地址及其所属网卡名
+type localIP struct {
+	IP    string
+	Iface string
+}
+
+// localIPv4s 枚举本机非回环、已启用网卡的 IPv4 地址(用于启动横幅显示可分享的访问地址)
+func localIPv4s() []localIP {
+	var out []localIP
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok {
+				if v4 := ipn.IP.To4(); v4 != nil {
+					out = append(out, localIP{v4.String(), ifc.Name})
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].IP < out[j].IP })
+	return out
+}
+
+// printListenAddrs 打印服务器实际监听地址: 优先本机 IPv4(可直接分享给他人), 无则 localhost
+func printListenAddrs(port int) {
+	proto := getProtocol()
+	ips := localIPv4s()
+	if len(ips) == 0 {
+		fmt.Printf("  服务器启动: %s://localhost:%d\n", proto, port)
+		return
+	}
+	for i, li := range ips {
+		if i == 0 {
+			fmt.Printf("  服务器启动: %s://%s:%d (%s)\n", proto, li.IP, port, li.Iface)
+		} else {
+			fmt.Printf("              %s://%s:%d (%s)\n", proto, li.IP, port, li.Iface)
+		}
+	}
 }
 
 // defaultStaticDir 返回下载站默认共享目录: 二进制可执行文件所在目录, 失败时退回工作目录

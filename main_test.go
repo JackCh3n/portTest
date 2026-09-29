@@ -297,17 +297,18 @@ func TestDirListHandlerHTML(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	s := string(body)
-	for _, want := range []string{"Index of /", "📝 <a", ">hello.txt<", "📁 <a", `href="sub%20dir/"`, "2 B", "Modified"} {
+	for _, want := range []string{"Index of /", "📝 <a", ">hello.txt<", "📁 <a", `href="sub%20dir/"`, "2 B", "Modified",
+		`class="ops"`, `>curl</button>`, `>wget</button>`, `>run</button>`, "function cp("} {
 		if !strings.Contains(s, want) {
 			t.Errorf("列表页缺少 %q", want)
 		}
 	}
-	// 根路径不应有父目录链接
-	if strings.Contains(s, `href="../"`) {
-		t.Error("根路径不应显示 ../ 链接")
+	// 目录行不提供复制按钮: 页面共 1 个文件, 恰好 3 个按钮(curl/wget/run)
+	if n := strings.Count(s, "<button type="); n != 3 {
+		t.Errorf("复制按钮数量 = %d, want 3 (1 个文件 x curl/wget/run)", n)
 	}
 
-	// 子目录列表(含空格的目录名, 验证相对链接可访问 + 父目录链接)
+	// 子目录列表(含空格的目录名, 验证相对链接可访问 + 父目录链接 + 根路径无 ../)
 	resp2, err := http.Get(srv.URL + "/sub dir/")
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
