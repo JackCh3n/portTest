@@ -20,6 +20,8 @@ import (
 func makeStaticFileHandler(dirFS http.FileSystem, urlPrefix string) http.Handler {
 	fileServer := http.FileServer(dirFS)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 统一 nosniff: 列表页与文件下载均禁止 MIME 嗅探
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if !strings.HasSuffix(r.URL.Path, "/") {
 			// 文件(或由 FileServer 做斜杠重定向的路径): 原样转发
 			fileServer.ServeHTTP(w, r)
@@ -169,11 +171,17 @@ function doCopy(t){
   document.body.removeChild(ta);
   return ok?Promise.resolve():Promise.reject();
 }
+function absUrl(href){
+  try{return new URL(href,location.href).href;}catch(e){}
+  var o=location.protocol+'//'+location.host;
+  if(href.charAt(0)==='/')return o+href;
+  return o+location.pathname.replace(/[^\/]*$/,'')+href;
+}
 function cp(btn,kind){
   var a=btn.closest('tr').querySelector('td.name a');
   var raw=a.getAttribute('href').split('/').pop();
   var name;try{name=decodeURIComponent(raw);}catch(e){name=raw;}
-  var url=new URL(a.getAttribute('href'),location.href).href;
+  var url=absUrl(a.getAttribute('href'));
   var q=shq,cmd;
   if(kind==='curl')cmd='curl -f -o '+q(name)+' '+q(url);
   else if(kind==='wget')cmd='wget -O '+q(name)+' '+q(url);

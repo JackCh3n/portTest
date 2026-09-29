@@ -154,18 +154,16 @@ func runBenchMode(posArgs []string, method, data string, headers headerList, ins
 	)
 	startTime := time.Now()
 
-	// 任务队列
-	jobs := make(chan int, total)
-	for i := 0; i < total; i++ {
-		jobs <- i
-	}
-	close(jobs)
-
+	// 任务分配用原子计数器: 避免按 -n 预分配缓冲 channel 的内存开销(千万级 -n 时可达数百 MB)
+	var next int64
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for range jobs {
+			for {
+				if atomic.AddInt64(&next, 1) > int64(total) {
+					return
+				}
 				req := newReq()
 				if req == nil {
 					atomic.AddInt64(&failed, 1)

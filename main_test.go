@@ -426,6 +426,16 @@ func TestPreprocessDirFlag(t *testing.T) {
 	if len(got) != 3 || got[2] != "-dir=x" {
 		t.Errorf("无关参数被误改: %v", got)
 	}
+	// -dir 后跟纯数字: 目录用默认值, 数字保留为位置端口
+	got = preprocessDirFlag([]string{"-dir", "8090"})
+	if len(got) != 2 || got[0] != want || got[1] != "8090" {
+		t.Errorf("preprocessDirFlag([-dir 8090]) = %v, want [%s 8090]", got, want)
+	}
+	// -dir 后跟真实路径: 原样保留
+	got = preprocessDirFlag([]string{"-dir", "/data/share"})
+	if len(got) != 2 || got[0] != "-dir" || got[1] != "/data/share" {
+		t.Errorf("带路径 -dir 被误改: %v", got)
+	}
 }
 
 func TestGetResponseType(t *testing.T) {

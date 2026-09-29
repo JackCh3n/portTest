@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"syscall"
 	"strings"
 	"time"
 )
@@ -42,7 +43,7 @@ type JSONResponse struct {
 	Msg  string `json:"msg"`
 }
 
-const version = "1.2.1"
+const version = "1.3.0"
 
 // 退出码语义化，便于脚本根据退出码判断结果
 const (
@@ -655,7 +656,8 @@ func runPortMode(posArgs []string, flagPorts string, code int, jsonStr, htmlPath
 
 	// 等待任一 server 出错（正常运行时会一直阻塞在此）或用户中断
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
+	// SIGTERM: Linux 下 kill/systemd stop 默认信号, 也走优雅关闭(Windows 上无影响)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	interrupted := false
 	select {
 	case err := <-serverErr:
@@ -767,17 +769,42 @@ func defaultStaticDir() string {
 // preprocessDirFlag 预处理孤立的 -dir 参数:
 // "port-test -dir" 这种 -dir 后无值(或下一个参数是 flag)的写法,
 // 展开为 -dir=<二进制所在目录>, 使其直接触发下载站模式
+// isPortToken 判断参数是否为纯数字(视为端口号的简写形式)
+func isPortToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func preprocessDirFlag(args []string) []string {
 	def := ""
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if (a == "-dir" || a == "--dir") && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")) {
-			if def == "" {
-				def = defaultStaticDir()
+		if a == "-dir" || a == "--dir" {
+			next := ""
+			if i+1 < len(args) {
+				next = args[i+1]
 			}
-			out = append(out, "-dir="+def)
-			continue
+			// 孤立 -dir 或 -dir 后跟纯数字("-dir 8090" 意图为端口)时:
+			// 目录取默认值, 数字保留为位置参数交给 runPortMode 作端口解析
+			if next == "" || strings.HasPrefix(next, "-") || isPortToken(next) {
+				if def == "" {
+					def = defaultStaticDir()
+				}
+				out = append(out, "-dir="+def)
+				if isPortToken(next) {
+					out = append(out, next)
+					i++
+				}
+				continue
+			}
 		}
 		out = append(out, a)
 	}
@@ -1157,10 +1184,15 @@ func extractTrailingFlags(args []string, opts *flagOpts) []string {
 
 		// 值 flag: 需要下一个参数作为值
 		if fn, ok := valueFlags[norm]; ok {
-			// -dir 特殊: 孤立使用(无值或下一个参数是 flag)时默认共享二进制所在目录
-			if norm == "-dir" && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")) {
+			// -dir 特殊: 孤立使用(无值/下一个是 flag/下一个是纯数字端口)时
+			// 默认共享二进制所在目录; 数字保留为位置参数交给端口解析
+			if norm == "-dir" && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") || isPortToken(args[i+1])) {
 				if opts.staticDir != nil {
 					*opts.staticDir = defaultStaticDir()
+				}
+				if i+1 < len(args) && isPortToken(args[i+1]) {
+					rest = append(rest, args[i+1])
+					i++
 				}
 				continue
 			}

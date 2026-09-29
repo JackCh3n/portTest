@@ -38,7 +38,7 @@ go install github.com/JackCh3n/portTest@latest
 
 **方式三：源码构建**
 
-详见下方「构建」章节。当前版本：`v1.2.1`（运行 `port-test -version` 查看）。
+详见下方「构建」章节。当前版本：`v1.3.0`（运行 `port-test -version` 查看）。
 
 ### Port 模式
 
@@ -48,6 +48,9 @@ port-test -dir
 
 # 下载站: 指定目录与端口
 port-test -dir D:\share -port 8080
+
+# 下载站: -dir 后直接跟端口号的简写(目录用缺省值)
+port-test -dir 8090
 
 # 测试服务: 指定端口(默认 8080)
 port-test -port 8080
